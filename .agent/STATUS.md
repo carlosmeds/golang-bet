@@ -30,3 +30,8 @@ Criar o Run Orca, registrar a DAG, disparar T01/T02/T03 em worktrees isolados e 
 - Workers recebem apenas tarefa, REQ IDs, decisões pertinentes, handoffs e código local; `SPEC.md` fica reservado ao Lead e revisor independente.
 - Cada tarefa bem-sucedida produz commit próprio em worktree isolado; Lead integra na branch local após verificar handoff, diff e testes.
 - Não fazer push remoto.
+
+## Orca Run
+
+- Run: `run_21967f35dd24`; 19 tasks registradas com dependências Orca em `.agent/ORCA_RUN.yaml`.
+- Primeira onda pronta: T01, T02, T03. Próxima tarefa desbloqueável após T01: T12.
