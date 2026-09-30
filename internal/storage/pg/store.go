@@ -67,6 +67,10 @@ func Provide(c config.Config, lc fx.Lifecycle) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err = ApplyMigrations(ctx, s.Pool); err != nil {
+		s.Close()
+		return nil, err
+	}
 	lc.Append(fx.Hook{OnStop: func(context.Context) error { s.Close(); return nil }})
 	return s, nil
 }
@@ -79,6 +83,20 @@ type Tx struct{ pgx.Tx }
 
 func (s *Store) WithTx(ctx context.Context, fn func(*Tx) error) error {
 	raw, err := s.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer raw.Rollback(context.Background())
+	if err = fn(&Tx{raw}); err != nil {
+		return err
+	}
+	return classify(raw.Commit(ctx))
+}
+
+// WithSnapshot gives reconciliation and multi-query reads one consistent
+// database view; PostgreSQL repeatable-read prevents a balance/ledger split.
+func (s *Store) WithSnapshot(ctx context.Context, fn func(*Tx) error) error {
+	raw, err := s.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return err
 	}
