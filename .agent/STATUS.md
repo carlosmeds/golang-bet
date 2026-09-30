@@ -1,46 +1,23 @@
-# Estado do projeto
+# Project status
 
-Data: 2026-09-30 (America/Sao_Paulo)
+Date: 2026-09-30 (America/Sao_Paulo)
 
-## Fase atual
+## State
 
-**Implementação ativa.** O plano foi aprovado; Orca supervisionará workers por DAG. Nenhum push remoto está autorizado.
+Implementation is active on local integration branch `carlosmeds/lead`. Orca Run `run_21967f35dd24` supervises the DAG. Remote push remains disabled. `SPEC.md` is immutable, ignored, and local; workers receive requirement IDs and handoffs instead of the full specification.
 
-## Inspeção realizada
+## Integrated tasks
 
-- `LEAD.md` lido integralmente; proíbe modificar `SPEC.md` e referenciar a origem externa do desafio.
-- `SPEC.md` lido integralmente (372 linhas, 25.877 bytes). O arquivo faltava neste worktree e foi copiado da raiz local do projeto, sem alteração; SHA-256 em ambas as cópias: `6298060871dd199a6ca5de2d6b7f007c4dccc887cc1c9ae1eb81982a4ca79135`.
-- Repositório inspecionado: apenas `.gitignore` e `LEAD.md` estão versionados; não há aplicação, migrations, testes nem documentação de solução.
-- `SPEC.md` está ignorado por `.gitignore` e permanece local. Não será adicionado ao Git.
+- T01–T10 except T11, plus T12, T14 and provisional T18 documentation are committed locally. T02/T03/T05/T10 used Claude Sonnet; T12/T14/T18 used Antigravity; the Lead acted as Codex for T01/T04/T06/T07/T08/T09 after Orca Codex TUI readiness failures.
+- R12 repaired Compose dependency healthchecks and added app/IdP provisioning. R13 repaired actual Keycloak access-token claims, issuer/JWKS configuration and queue policy targeting. R14 fixed PostgreSQL update timestamps exposed by live transaction tests.
+- T11 (outbox worker) and T16 (real IdP/HTTP tests) are running in separate Claude Sonnet worktrees. The Lead is integrating and verifying the messaging path.
 
-## Artefatos desta fase
+## Verification to date
 
-- `.agent/PLAN.md`: arquitetura, riscos, critérios de conclusão e paralelização.
-- `.agent/TASKS.yaml`: DAG de tarefas, dependências, critérios e agente/modelo recomendado.
-- `.agent/DECISIONS.md`: decisões técnicas propostas e pontos em aberto.
-- `.agent/STATUS.md`: este registro.
+- `go test ./...`, focused `go test -race`, and `go vet ./...` have passed after major integrations.
+- Real PostgreSQL tests cover schema constraints, wallet opening, replay, inbox hash conflicts, pending references, competing reversals, duplicate concurrent BETs, and reference worker lease recovery.
+- Compose builds and runs PostgreSQL, Keycloak, MiniStack and the app. Real Keycloak tokens were used to open a 100.00 BRL wallet, process and replay a BET, paginate its ledger, reconcile the final balance and verify provider isolation. A real inbound SQS message produced one BET/inbox commit and was deleted after commit. Malformed JSON reached the provisioned DLQ after redrive.
 
-## Próximo marco
+## Next work
 
-Criar o Run Orca, registrar a DAG, disparar T01/T02/T03 em worktrees isolados e integrar cada commit após handoff, revisão de diff e testes relevantes. Continuar automaticamente até a verificação final.
-
-## Política de execução
-
-- Lead decide arquitetura, bibliotecas, ordem, integração e reparos sem gates de aprovação.
-- Workers recebem apenas tarefa, REQ IDs, decisões pertinentes, handoffs e código local; `SPEC.md` fica reservado ao Lead e revisor independente.
-- Cada tarefa bem-sucedida produz commit próprio em worktree isolado; Lead integra na branch local após verificar handoff, diff e testes.
-- Não fazer push remoto.
-
-## Orca Run
-
-- Run: `run_21967f35dd24`; 19 tasks registradas com dependências Orca em `.agent/ORCA_RUN.yaml`.
-- Primeira onda pronta: T01, T02, T03. Próxima tarefa desbloqueável após T01: T12.
-
-## Implementação em andamento
-
-- T01 concluída pelo Lead em `3892af7`, com `go test ./...` e `go vet ./...` aprovados. Orca não detectou idle no Codex TUI após três tentativas de lançamento; houve takeover local documentado no handoff.
-- T02 foi redistribuída para Claude Sonnet/high após falha de readiness no Codex TUI.
-- T03 executa em Claude Sonnet/high, em worktree isolado.
-- T03 integrada em `0d95db2`; `go test ./...`, `go test -race ./internal/domain/...` e `go vet ./...` passaram.
-- T04 concluída pelo Lead em `7564393`; testes de hash HTTP/SQS cruzado, `go test ./...`, race focado e vet passaram.
-- T12 integrada em `59c9e65`. Verificação independente detectou healthchecks unhealthy por falta de `curl`, e lacunas de app service, identidades e acesso SQS. R12 está ativa para reparo; não iniciar testes dependentes de infraestrutura antes de integrá-la.
+Integrate T11 and T16 after handoff, diff review and relevant tests; dispatch T13/T15 when T11 unlocks them. Complete multi-process and crash tests T17, repair provisional documentation, then run independent adversarial review T19 against `SPEC.md` and remediate findings. No user approval gate applies to normal engineering decisions.
