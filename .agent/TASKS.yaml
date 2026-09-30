@@ -356,3 +356,14 @@ parallel_sets:
   agent: codex
   model_tier: standard
   reasoning_effort: medium
+- id: R15
+  title: Release all SQS batch receipts on shutdown
+  depends_on:
+  - T09
+  parallel_group: repair
+  owner_area: internal/messaging/consumer/
+  deliverables: Release every unstarted receipt after context cancellation
+  done_when: Focused cancelled-batch test verifies all receipts become visible and none are deleted
+  agent: codex
+  model_tier: standard
+  reasoning_effort: medium

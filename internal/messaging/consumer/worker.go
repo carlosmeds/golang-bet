@@ -114,9 +114,11 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, message := range out.Messages {
+	for i, message := range out.Messages {
 		if ctx.Err() != nil {
-			_ = w.release(context.Background(), message)
+			for _, unstarted := range out.Messages[i:] {
+				_ = w.release(context.Background(), unstarted)
+			}
 			return ctx.Err()
 		}
 		if err := w.handle(ctx, message); err != nil {

@@ -50,3 +50,6 @@ R12's first realm repair passed Compose health checks, but real access tokens st
 
 ### D29 — Use wall-clock update timestamps in SQL triggers
 PostgreSQL `now()` is fixed at transaction start. A domain transaction created after `BEGIN` can therefore have `created_at` later than the SQL trigger's `updated_at`; rehydration rejects it. Wallet and transaction update triggers use `GREATEST(clock_timestamp(), OLD.updated_at, NEW.created_at)` so timestamps stay monotonic. The live use-case suite exposed and verifies this failure mode.
+
+### D30 — Release every receipt in a cancelled SQS batch
+SQS ReceiveMessage can return up to ten messages already hidden by a visibility timeout. On shutdown, a cancelled consumer now releases all unstarted receipts in that batch, and never deletes them, so another instance can retry immediately.

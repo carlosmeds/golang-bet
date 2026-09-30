@@ -16,12 +16,16 @@ import (
 const validBody = `{"messageId":"message-1","type":"WagerTransactionRequested","occurredAt":"2026-09-30T12:00:00Z","data":{"providerId":"provider-a","externalTransactionId":"ext-1","idempotencyKey":"key-1","playerId":"player-1","walletId":"a1d3f476-b151-4644-aece-0871b4e22b7e","roundId":"r-1","gameId":"g-1","kind":"BET","money":{"amount":"1.00","currency":"BRL"}}}`
 
 type fakeSQS struct {
-	message types.Message
-	deleted int
-	changed []int32
+	message  types.Message
+	messages []types.Message
+	deleted  int
+	changed  []int32
 }
 
 func (f *fakeSQS) ReceiveMessage(context.Context, *sqs.ReceiveMessageInput, ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
+	if f.messages != nil {
+		return &sqs.ReceiveMessageOutput{Messages: f.messages}, nil
+	}
 	return &sqs.ReceiveMessageOutput{Messages: []types.Message{f.message}}, nil
 }
 func (f *fakeSQS) DeleteMessage(context.Context, *sqs.DeleteMessageInput, ...func(*sqs.Options)) (*sqs.DeleteMessageOutput, error) {
@@ -79,5 +83,24 @@ func TestAckOnlyAfterDurableSuccess(t *testing.T) {
 				t.Fatal("invalid envelope reached processor")
 			}
 		})
+	}
+}
+
+func TestCancelledBatchReleasesAllReceipts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	broker := &fakeSQS{messages: []types.Message{{ReceiptHandle: aws.String("one")}, {ReceiptHandle: aws.String("two")}}}
+	worker, err := New(broker, &fakeProcessor{}, DefaultConfig("queue-url"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = worker.RunOnce(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancel: %v", err)
+	}
+	if len(broker.changed) != 2 || broker.changed[0] != 0 || broker.changed[1] != 0 {
+		t.Fatalf("released: %+v", broker.changed)
+	}
+	if broker.deleted != 0 {
+		t.Fatal("deleted uncommitted receipt")
 	}
 }
