@@ -1,0 +1,24 @@
+{
+  "realm": "wagering",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "wagering-client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "wagering-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "publicClient": false,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-wagering-client",
+      "enabled": true,
+      "serviceAccountClientId": "wagering-client"
+    }
+  ]
+}
