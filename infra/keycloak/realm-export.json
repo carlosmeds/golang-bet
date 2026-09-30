@@ -12,6 +12,90 @@
       "directAccessGrantsEnabled": false,
       "publicClient": false,
       "protocol": "openid-connect"
+    },
+    {
+      "clientId": "provider-a",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "provider-a-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "provider-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "provider_id",
+            "claim.value": "provider-a",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.tokenResponse.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "provider-b",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "provider-b-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "provider-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "provider_id",
+            "claim.value": "provider-b",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.tokenResponse.claim": "false"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "internal-service",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "internal-secret",
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "role-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-hardcoded-claim-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "role",
+            "claim.value": "internal",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "access.tokenResponse.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -19,6 +103,21 @@
       "username": "service-account-wagering-client",
       "enabled": true,
       "serviceAccountClientId": "wagering-client"
+    },
+    {
+      "username": "service-account-provider-a",
+      "enabled": true,
+      "serviceAccountClientId": "provider-a"
+    },
+    {
+      "username": "service-account-provider-b",
+      "enabled": true,
+      "serviceAccountClientId": "provider-b"
+    },
+    {
+      "username": "service-account-internal-service",
+      "enabled": true,
+      "serviceAccountClientId": "internal-service"
     }
   ]
 }

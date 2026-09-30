@@ -7,7 +7,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/bin/wagering ./cmd/wagering
 
-FROM alpine:latest
+FROM alpine:3.20
 RUN apk --no-cache add ca-certificates
 
 WORKDIR /app
