@@ -270,6 +270,19 @@ tasks:
   agent: claude
   model_tier: frontier
   reasoning_effort: high
+- id: R12
+  title: Repair Compose readiness, IdP identities and SQS access
+  depends_on:
+  - T12
+  parallel_group: repair
+  owner_area: compose.yaml, Dockerfile, .env.example, infra/
+  deliverables: App service, correct dependency healthchecks, provider/internal client identities, broker access
+    controls
+  done_when: Clean Compose stack runs app and healthy dependencies; tokens carry isolation claims; queues and access
+    policy verified
+  agent: antigravity
+  model_tier: standard
+  reasoning_effort: medium
 parallel_sets:
 - after: []
   can_run:

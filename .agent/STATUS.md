@@ -41,3 +41,6 @@ Criar o Run Orca, registrar a DAG, disparar T01/T02/T03 em worktrees isolados e 
 - T01 concluída pelo Lead em `3892af7`, com `go test ./...` e `go vet ./...` aprovados. Orca não detectou idle no Codex TUI após três tentativas de lançamento; houve takeover local documentado no handoff.
 - T02 foi redistribuída para Claude Sonnet/high após falha de readiness no Codex TUI.
 - T03 executa em Claude Sonnet/high, em worktree isolado.
+- T03 integrada em `0d95db2`; `go test ./...`, `go test -race ./internal/domain/...` e `go vet ./...` passaram.
+- T04 concluída pelo Lead em `7564393`; testes de hash HTTP/SQS cruzado, `go test ./...`, race focado e vet passaram.
+- T12 integrada em `59c9e65`. Verificação independente detectou healthchecks unhealthy por falta de `curl`, e lacunas de app service, identidades e acesso SQS. R12 está ativa para reparo; não iniciar testes dependentes de infraestrutura antes de integrá-la.
