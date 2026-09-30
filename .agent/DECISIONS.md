@@ -47,3 +47,6 @@ Estas decisões são propostas de implementação para revisão; `SPEC.md` preva
 
 ### D28 — Verify real IdP claims before HTTP integration
 R12's first realm repair passed Compose health checks, but real access tokens still lacked the provider and internal scope claims required by T05, and the outbound queue policy targeted the inbound queue ARN. R13 will fix these using a fresh realm import and real token inspection. The HTTP app is not yet wired, so dependency health is the current Compose gate.
+
+### D29 — Use wall-clock update timestamps in SQL triggers
+PostgreSQL `now()` is fixed at transaction start. A domain transaction created after `BEGIN` can therefore have `created_at` later than the SQL trigger's `updated_at`; rehydration rejects it. Wallet and transaction update triggers use `GREATEST(clock_timestamp(), OLD.updated_at, NEW.created_at)` so timestamps stay monotonic. The live use-case suite exposed and verifies this failure mode.

@@ -256,7 +256,7 @@ BEGIN
                 USING ERRCODE = 'check_violation', CONSTRAINT = 'wager_transactions_attempt_count_monotonic';
         END IF;
 
-        NEW.updated_at := now();
+        NEW.updated_at := GREATEST(clock_timestamp(), OLD.updated_at, NEW.created_at);
     END IF;
 
     -- A resolved reference must be the very transaction the external id names

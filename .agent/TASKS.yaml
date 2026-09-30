@@ -345,3 +345,14 @@ parallel_sets:
   agent: antigravity
   model_tier: economy
   reasoning_effort: medium
+- id: R14
+  title: Preserve monotonic SQL updated_at timestamps
+  depends_on:
+  - T02
+  parallel_group: repair
+  owner_area: migrations/000001_wallets.up.sql, migrations/000002_wager_transactions.up.sql
+  deliverables: Wall-clock trigger timestamp no earlier than created_at
+  done_when: Live use-case replay and reference tests rehydrate records created after transaction BEGIN
+  agent: codex
+  model_tier: standard
+  reasoning_effort: medium

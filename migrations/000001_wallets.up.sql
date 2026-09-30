@@ -58,7 +58,7 @@ BEGIN
             USING ERRCODE = 'check_violation', CONSTRAINT = 'wallets_version_step';
     END IF;
 
-    NEW.updated_at := now();
+    NEW.updated_at := GREATEST(clock_timestamp(), OLD.updated_at, NEW.created_at);
     RETURN NEW;
 END;
 $$;
