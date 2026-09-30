@@ -1,0 +1,56 @@
+# Local project specification
+SPEC.md
+
+# Binaries
+/bin/
+build/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go test / coverage
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data
+tmp/
+.temp/
+.local/
+
+# Docker / local volumes
+data/
+volumes/
+
+# Logs
+*.log
+
+# Secrets / certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Agent-specific local state
+.claude/
+.codex/
