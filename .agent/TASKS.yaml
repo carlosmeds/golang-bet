@@ -367,3 +367,14 @@ parallel_sets:
   agent: codex
   model_tier: standard
   reasoning_effort: medium
+- id: R16
+  title: Preserve outbox order across publishers
+  depends_on:
+  - T06
+  parallel_group: repair
+  owner_area: internal/storage/pg/outbox.go, internal/storage/pg/store_test.go
+  deliverables: Claim gate for earlier unpublished events of the same aggregate
+  done_when: Two owners cannot claim later wallet event before first publication
+  agent: codex
+  model_tier: standard
+  reasoning_effort: high

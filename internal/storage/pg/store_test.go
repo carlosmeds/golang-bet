@@ -150,3 +150,49 @@ func TestAtomicOpeningAndConflict(t *testing.T) {
 		t.Fatalf("duplicate conflict: %v", err)
 	}
 }
+
+func TestOutboxClaimPreservesAggregateOrder(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	amount, _ := domain.NewMoney(1000, "BRL")
+	opened, err := domain.OpenWallet(domain.OpenWalletInput{PlayerID: "ordered-player", InitialBalance: amount, CorrelationID: "opening", Now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.WithTx(ctx, func(tx *Tx) error {
+		if e := tx.InsertWallet(ctx, opened.Wallet); e != nil {
+			return e
+		}
+		if e := tx.InsertTransaction(ctx, opened.Opening, time.Time{}, nil); e != nil {
+			return e
+		}
+		if e := tx.InsertLedger(ctx, opened.Ledger, 1); e != nil {
+			return e
+		}
+		for _, event := range opened.Events {
+			if e := tx.InsertOutbox(ctx, event, now); e != nil {
+				return e
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.ClaimOutbox(ctx, "publisher-1", 10, time.Minute)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first claim: %+v %v", first, err)
+	}
+	second, err := s.ClaimOutbox(ctx, "publisher-2", 10, time.Minute)
+	if err != nil || len(second) != 0 {
+		t.Fatalf("second event overtook unpublished first: %+v %v", second, err)
+	}
+	if err = s.MarkPublished(ctx, first[0].EventID, "publisher-1"); err != nil {
+		t.Fatal(err)
+	}
+	second, err = s.ClaimOutbox(ctx, "publisher-2", 10, time.Minute)
+	if err != nil || len(second) != 1 || second[0].EventID == first[0].EventID {
+		t.Fatalf("second claim: %+v %v", second, err)
+	}
+}

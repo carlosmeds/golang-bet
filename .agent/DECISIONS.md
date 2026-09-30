@@ -53,3 +53,6 @@ PostgreSQL `now()` is fixed at transaction start. A domain transaction created a
 
 ### D30 — Release every receipt in a cancelled SQS batch
 SQS ReceiveMessage can return up to ten messages already hidden by a visibility timeout. On shutdown, a cancelled consumer now releases all unstarted receipts in that batch, and never deletes them, so another instance can retry immediately.
+
+### D31 — Gate outbox claims by earlier unpublished aggregate events
+FIFO order across multiple publishers requires a database claim predicate: a wallet event is ineligible while any earlier event for that aggregate remains unpublished, even if another process has leased it. The claim query now enforces this; a real PostgreSQL test with two owners verifies no overtaking.

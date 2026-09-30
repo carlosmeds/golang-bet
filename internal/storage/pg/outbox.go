@@ -30,7 +30,7 @@ func (s *Store) ClaimOutbox(ctx context.Context, owner string, limit int, lease 
 	if owner == "" || limit < 1 || lease <= 0 {
 		return nil, ErrInvalidClaim
 	}
-	rows, err := s.Pool.Query(ctx, `WITH due AS (SELECT event_id FROM outbox_events WHERE published_at IS NULL AND next_attempt_at<=now() AND (lease_expires_at IS NULL OR lease_expires_at<=now()) ORDER BY seq FOR UPDATE SKIP LOCKED LIMIT $2) UPDATE outbox_events o SET lease_owner=$1,lease_expires_at=now()+($3 * interval '1 microsecond') FROM due WHERE o.event_id=due.event_id RETURNING o.event_id::text,o.payload,o.attempt_count`, owner, limit, lease.Microseconds())
+	rows, err := s.Pool.Query(ctx, `WITH due AS (SELECT candidate.event_id FROM outbox_events candidate WHERE candidate.published_at IS NULL AND candidate.next_attempt_at<=now() AND (candidate.lease_expires_at IS NULL OR candidate.lease_expires_at<=now()) AND NOT EXISTS (SELECT 1 FROM outbox_events older WHERE older.aggregate_type=candidate.aggregate_type AND older.aggregate_id=candidate.aggregate_id AND older.seq<candidate.seq AND older.published_at IS NULL) ORDER BY candidate.seq FOR UPDATE SKIP LOCKED LIMIT $2) UPDATE outbox_events o SET lease_owner=$1,lease_expires_at=now()+($3 * interval '1 microsecond') FROM due WHERE o.event_id=due.event_id RETURNING o.event_id::text,o.payload,o.attempt_count`, owner, limit, lease.Microseconds())
 	if err != nil {
 		return nil, err
 	}
