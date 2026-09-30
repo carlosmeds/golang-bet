@@ -35,3 +35,9 @@ Criar o Run Orca, registrar a DAG, disparar T01/T02/T03 em worktrees isolados e 
 
 - Run: `run_21967f35dd24`; 19 tasks registradas com dependências Orca em `.agent/ORCA_RUN.yaml`.
 - Primeira onda pronta: T01, T02, T03. Próxima tarefa desbloqueável após T01: T12.
+
+## Implementação em andamento
+
+- T01 concluída pelo Lead em `3892af7`, com `go test ./...` e `go vet ./...` aprovados. Orca não detectou idle no Codex TUI após três tentativas de lançamento; houve takeover local documentado no handoff.
+- T02 foi redistribuída para Claude Sonnet/high após falha de readiness no Codex TUI.
+- T03 executa em Claude Sonnet/high, em worktree isolado.

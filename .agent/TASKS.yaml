@@ -27,9 +27,10 @@ tasks:
     and triggers
   done_when: Migration reversal works; SQL rejects duplicate opening, negative balance, invalid ledger equation,
     update/delete ledger and conflicting unique keys
-  agent: codex
+  agent: claude
   model_tier: standard
   reasoning_effort: high
+  actual_model: Sonnet 5.5
 - id: T03
   title: Implement domain model and typed events
   depends_on: []
@@ -41,6 +42,7 @@ tasks:
   agent: claude
   model_tier: standard
   reasoning_effort: high
+  actual_model: Sonnet 5.5
 - id: T04
   title: Define transport contracts and canonical idempotency hash
   depends_on:
