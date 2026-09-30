@@ -333,3 +333,15 @@ parallel_sets:
   - T13
   - T15
   - T16
+- id: R13
+  title: Repair real Keycloak claims and broker policy
+  depends_on:
+  - R12
+  - T05
+  parallel_group: repair
+  owner_area: compose.yaml, infra/keycloak/, infra/localstack/
+  deliverables: Real provider/internal token scopes, matching issuer/audience and JWKS, corrected event queue policy
+  done_when: Fresh Compose Keycloak tokens verify against internal/auth and queue policies target correct ARNs
+  agent: antigravity
+  model_tier: economy
+  reasoning_effort: medium
