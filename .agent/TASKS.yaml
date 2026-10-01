@@ -152,7 +152,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T11
-  state: recovery_committed
+  state: complete
   title: Implement transactional outbox publisher
   depends_on:
   - T01
@@ -178,7 +178,7 @@ tasks:
   model_tier: economy
   reasoning_effort: medium
 - id: T13
-  state: recovery_committed_live_unverified
+  state: complete
   title: Add logs, metrics and health checks
   depends_on:
   - T01
@@ -208,7 +208,7 @@ tasks:
   model_tier: economy
   reasoning_effort: medium
 - id: T15
-  state: partial
+  state: complete
   title: Write real DB/SQS integration tests
   depends_on:
   - T07
@@ -224,7 +224,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T16
-  state: recovery_committed
+  state: complete
   title: Write real IdP and HTTP authorization integration tests
   depends_on:
   - T05
@@ -273,7 +273,7 @@ tasks:
   model_tier: economy
   reasoning_effort: low
 - id: T19
-  state: blocked_external
+  state: pending
   title: Run final audit and close gaps
   depends_on:
   - T13
@@ -286,9 +286,10 @@ tasks:
   owner_area: cross-cutting verification and small fixes
   deliverables: gofmt, go test, race, vet, compose smoke, requirements matrix and corrected docs
   done_when: Every mandatory specification item has evidence; outstanding limitations are explicit
-  agent: claude
+  agent: codex
   model_tier: frontier
-  reasoning_effort: high
+  reasoning_effort: xhigh
+  actual_model: gpt-6-sol
 - id: R12
   state: complete
   title: Repair Compose readiness, IdP identities and SQS access
@@ -391,7 +392,7 @@ parallel_sets:
   model_tier: standard
   reasoning_effort: medium
 - id: R17
-  state: recovery_committed
+  state: complete
   title: Complete request correlation and SQS replay observability
   depends_on:
   - T13
@@ -414,3 +415,16 @@ parallel_sets:
   agent: codex
   model_tier: standard
   reasoning_effort: high
+- id: R18
+  state: complete
+  title: Restore real IdP HTTP integration test Fx wiring
+  depends_on:
+  - T13
+  - T16
+  parallel_group: repair
+  owner_area: tests/integration/auth/idptest/app.go
+  deliverables: Integration harness supplies the SQS client and metrics required by the current API composition
+  done_when: Real Keycloak/PostgreSQL auth and HTTP integration suites pass under -race with no production behavior changes
+  agent: codex
+  model_tier: standard
+  reasoning_effort: medium

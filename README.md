@@ -68,7 +68,9 @@ The default suite includes unit tests and skips live-dependency tests when their
 
 ```sh
 WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' go test ./internal/storage/pg ./internal/workers/reference ./internal/workers/outbox -count=1
-WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' WAGERING_TEST_KEYCLOAK_URL='http://localhost:8082' go test ./tests/... -count=1
+WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' \
+WAGERING_TEST_KEYCLOAK_URL='http://localhost:8082' WAGERING_TEST_SQS_ENDPOINT='http://localhost:4566' \
+go test -p 1 ./tests/... -count=1
 ```
 
 For repeatable multi-instance and crash-window verification, see [ARCHITECTURE.md](ARCHITECTURE.md) for implemented guarantees and current test coverage. The `tests/integration` packages use real Keycloak and PostgreSQL; messaging tests use the real AWS SQS-compatible endpoint supplied through the local stack.

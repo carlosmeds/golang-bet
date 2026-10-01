@@ -80,3 +80,12 @@ The original linked worktree was read-only during the recovery run, so commits w
 
 ### D39 — Isolate multiprocess system tests with per-run queues
 The Compose application also consumes the project's default inbound queue. Sharing that queue with T17 allows the normal Compose process, which uses a different database, to steal test messages. Each T17 run now creates unique real FIFO input and output queues and removes them at cleanup. Test subscenarios also ensure their required app-process count so a failed earlier scenario cannot cascade into a panic in later scenarios.
+
+### D40 — Test aggregate ordering against the current claim gate
+`ClaimOutbox` claims only the earliest unpublished event for each aggregate. A publisher pass therefore cannot claim later same-aggregate rows until the earlier event is marked published. Integration tests now advance ordered events across `RunOnce` calls and check sequence visibility after each prior publication; a failed first event leaves later events unclaimed while other aggregates continue.
+
+### D41 — Use the available high-reasoning Codex model for T19
+Orca account discovery on 2026-10-01 showed the Claude OAuth token expired and its provider unavailable; Codex auth is active and its configured model is `gpt-6-sol`. T19 uses an independent Codex session at xhigh reasoning in a separate Orca-managed worktree. The reviewer receives the immutable SPEC, REQUIREMENTS, DECISIONS and final code without earlier review conclusions.
+
+### D42 — Serialize the real integration batch against shared Compose services
+The auth, HTTP, PostgreSQL, reference, outbox and T17 suites share one Compose PostgreSQL/Keycloak/MiniStack stack. A parallel batch passed auth/HTTP and DB suites but once timed out before the T17 fault marker; T17 passed independently four times and the full live batch passed with `go test -p 1`. README uses `-p 1` for reproducible runs against this shared stack.

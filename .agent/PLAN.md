@@ -56,7 +56,7 @@ Paralelização prevista para workers Orca supervisionados quando o runtime esti
 4. Integração financeira/mensageria (`T15`) e integração de autenticação (`T16`) podem rodar em paralelo. `T17` executa cenários de múltiplos processos depois que os fluxos completos estiverem prontos.
 5. Documentação (`T18`) acompanha os contratos estáveis; auditoria final (`T19`) consolida tudo.
 
-Estado de execução: T11/T13/T16 estão integrados; T17 e T19 seguem abertos no DAG. O runtime Orca foi restabelecido em 2026-10-01 e a inicialização do Compose está em andamento. A próxima execução é o T17 real com processos independentes; após seus reparos, o T19 fará a revisão adversarial independente com a especificação completa.
+Estado de execução: T11/T13/T16/T17 estão implementados e o R18 restaurou o harness HTTP às dependências atuais. O T17 real passou repetidamente com três processos independentes. A revisão T19 será despachada após o conjunto final de integrações reais passar; o reviewer lerá a especificação completa, requisitos, decisões e código final.
 
 Para reduzir conflitos entre worktrees, cada tarefa tem dono de arquivos e deve preservar interfaces acordadas. O responsável principal integra mudanças em ordem de dependência; nenhuma tarefa paralela altera migrations ou APIs compartilhadas sem alinhar o contrato primeiro.
 

@@ -12,51 +12,39 @@ implement_code_now: true
 push_remote_now: false
 ```
 
-No approval gates apply. Branch reported by the original worktree is `carlosmeds/lead`, HEAD `3f469e0`, remote `origin` is `https://github.com/carlosmeds/golang-bet.git`. The original shared Git common directory and root `.git` gitfile are read-only in this session. To preserve that Orca linkage, I did not replace it. A local, no-hardlink recovery Git copy is at `.agent/gitmeta`; it tracks the same `carlosmeds/lead` base and uses the current directory as its worktree via `GIT_DIR`/`GIT_WORK_TREE`. The exact original gitdir pointer is saved in `.agent/ORIGINAL_GITDIR.txt`. No remote update/push occurred. Recovery-copy commits are not reflected in the original common refs.
+The original linked worktree remains on `carlosmeds/lead` at `3f469e0` with all prior uncommitted files preserved. The recovery commits have been fetched into the local Git common repository and integrated on the separate local branch `carlosmeds/lead-integration`; its current code/test commits are `4e78f23`, `44f2021`, `db3e9e7`, and `d0eb026`, after the recovery history. The `carlosmeds/lead-recovery` branch preserves the first transfer point. The original worktree was not reset or overwritten. No push or main merge occurred.
 
-Recovery-copy commits:
+Orca Run `run_21967f35dd24` is active and the runtime is ready. T11 and T16 completion reports were inspected and acknowledged. T17 and repair R18 are completed in the DAG; the only remaining gate is T19 independent adversarial review and any repairs it generates. Claude OAuth is expired in Orca; Codex authentication is active and the configured model is `gpt-6-sol`. T19 is allocated to a separate Codex session at xhigh reasoning.
 
-- `b927954` outbox publisher and telemetry wiring
-- `69d8344` readiness, health and SQS metrics
-- `71e03a8` reversible migration CLI
-- `6a4cb68` real IdP/HTTP authorization integration tests
-- `9ef5d8e` independent-process recovery scenarios (implemented; live execution pending)
-- `7801c7c` gofmt for the earlier T14 test files
-- `93725c7` complete request correlation, SQS replay metrics and safe structured logs
-
-Recovery-copy HEAD is being advanced locally and contains the implementation and recovery fixes. The original shared branch remains at `3f469e0`; Git writes are now available, and recovery commits will be transferred through a new integration worktree without altering the original worktree's pending changes.
-
-Orca Run `run_21967f35dd24` is active. On 2026-10-01, the Orca runtime returned `app.running=true`, `runtime.state=ready`, and `graph.state=ready`. The coordinator received and verified the T11 (`95f1175`) and T16 (`9b041bf`) completion reports and acknowledged delivery `delivery_7b36d3465d32`. T17 and T19 remain pending in the DAG and will be dispatched through Orca.
-
-`SPEC.md` remains immutable and local; SHA-256 `6298060871dd199a6ca5de2d6b7f007c4dccc887cc1c9ae1eb81982a4ca79135`.
+`SPEC.md` is local, ignored and unchanged. SHA-256 in the source checkout and reviewer checkout: `6298060871dd199a6ca5de2d6b7f007c4dccc887cc1c9ae1eb81982a4ca79135`.
 
 ## Task outcomes
 
-- T01–T10, T12, T14 and T18 implementation is present; prior real Compose/Keycloak/SQS evidence and worker handoffs are retained.
-- T11 outbox publisher, SQS sender adapter, stable IDs, lease/retry behavior, sequence ordering gate, metrics hooks and PostgreSQL integration tests are present. T11 handoff reports real PostgreSQL and race coverage passed.
-- T13 health routes, DB/SQS readiness, structured JSON logging, aggregate Prometheus counters, reconciliation divergence reporting, and worker metrics hooks are present. Focused/unit/race tests pass; live readiness remains unverified now.
-- T15 includes PostgreSQL/outbox/reference plus Keycloak/HTTP tests. T17 adds `tests/system/multiprocess_test.go`: it builds three independent service processes, sends required races, uses build-tag-only fault hooks for consumer commit-before-delete and outbox lease-crash windows, checks restart/reference/cross-transport recovery, and reconciles ledger sums. It creates isolated inbound/outbound FIFO queues per run to avoid interference from the Compose app consumer. `go test -race -count=1 ./tests/system` passed against live Compose PostgreSQL, Keycloak and MiniStack.
-- T16 real Keycloak/HTTP authorization suites and handoff remain. Handoff reports full live integration and race tests passed before this sandbox's network restriction.
-- T19 is not complete: launch an independent adversarial reviewer with the immutable `SPEC.md`, requirements, decisions and final integrated code; do not provide earlier review conclusions.
+- T01–T14, T16–T18 and T17 implementation are integrated on `carlosmeds/lead-integration`; T11/T13/T15 and T16 now have current verification evidence.
+- T11 outbox publisher uses leased claims, stable event identity, per-aggregate ordering, retries, metrics and graceful shutdown. Live PostgreSQL crash, contention and ordering tests pass under `-race`.
+- T13 health/readiness, structured identifiers in logs and metrics are implemented; live Compose readiness passed.
+- T15 PostgreSQL, reference, outbox, Keycloak/HTTP and SQS multi-process integration suites passed against Compose under `-race`.
+- T16 IdP/HTTP authorization tests now compose the current metrics and SQS modules through repair R18 (`d0eb026`).
+- T17 starts three independent service processes, creates isolated FIFO queues, exercises replay/race/restart/crash/recovery and reconciles the ledger. It passed independently four times and in the sequential live integration batch.
+- T19 has not run. It must receive the immutable `SPEC.md`, `REQUIREMENTS.md`, `DECISIONS.md` and final code, with no previous review conclusions. Valid findings must become repair tasks.
 
-## Verification in the current environment
+## Verification
 
-- Passed: focused `go test` for consumer, outbox, observability, and system-test package (system suite skips when integration environment variables are absent).
-- Passed: compile-only `go test -run '^$' ./tests/system` and tagged `go test -tags=systemfault -run '^$' ./tests/system`.
-- Passed: `GOCACHE=/tmp/gocache go vet ./...` after formatting and observability fixes.
-- Passed: focused tests for observability, consumer, outbox, reference, migration and the default/tagged T17 builds.
-- Passed: focused `go test -race` for observability, consumer, outbox and reference worker before the final log-only changes; rerun after final code changes.
-- Attempted: `go test ./...` and `go test -race ./...`; both fail at `internal/auth` local `httptest` listener creation due socket policy. Other package results in each run passed.
-- Passed: `docker compose config` and `docker compose up -d --build --wait`; all five services reported healthy, including the application.
-- Passed: live T17 with `-race`, three independent app processes, temporary PostgreSQL database and per-run FIFO queues; all five scenarios passed.
-- Prior environment restriction: Docker/TCP access was denied. The current environment has full access; Compose bootstrap and all live tests are being retried.
-- A full `go test ./...` earlier failed only when `internal/auth`'s `httptest.NewServer` attempted to listen on a local TCP socket; packages in that run otherwise passed.
+- Passed: `gofmt` over all Go files, `go vet ./...`, `go test ./...`, and `go test -race ./...`.
+- Passed: `docker compose config`, `docker compose up -d --build --wait`; PostgreSQL, Keycloak, MiniStack and the application reported healthy. `GET /health/ready` returned `ready`.
+- Passed: live system suite under `-race`, including 50 duplicate requests through three processes, two competing 80 BETs against balance 100, independent wallets, HTTP/SQS replay crossing, inbox commit-before-delete crash/redelivery, pending-reference resolution after restart, outbox lease recovery in another process, and final ledger reconciliation.
+- Passed: real live integration batch with `-race -p 1`: `./tests/...`, `./internal/storage/pg`, `./internal/workers/reference`, and `./internal/workers/outbox`.
+- Passed: R18 real Keycloak/PostgreSQL auth and HTTP tests under `-race`, including SQS-backed readiness and metrics.
+- Passed: real migration CLI smoke on a disposable PostgreSQL database: up, down one migration, up, then drop the scratch database.
+- One live integration batch using default package parallelism timed out before the T17 consumer crash marker while auth/HTTP and database packages passed. T17 independently passed four times, and the full live batch passed with `-p 1`; README documents that setting for shared Compose services.
+- `git diff --check` passed before the latest status/decision documentation update; rerun it before final commit.
 
 ## Remaining work
 
-1. Transfer recovery-copy commits into a new integration worktree while preserving the original worktree's uncommitted state.
-2. Run the independent T19 adversarial review; turn each valid finding into a repair task and verify its fix.
-3. Re-run gofmt, vet, all tests, Compose and system scenarios after repairs.
-4. Commit remaining changes logically and prepare the final local integration branch. Keep remote push and main merge disabled until verification is complete.
+1. Commit the current verification and model-allocation documentation changes.
+2. Create a separate Orca-managed T19 review worktree from `carlosmeds/lead-integration`; copy `SPEC.md` locally and confirm its hash before dispatch.
+3. Review every mandatory requirement and actively search for monetary, transaction, concurrency, auth, idempotency, replay, inbox/outbox, pending-reference, recovery and shutdown failures.
+4. Create and verify repair tasks for every valid finding, then rerun formatting, vet, all tests, live integrations, Compose and multi-process recovery.
+5. Commit the final local integration branch cleanly. Do not push or merge into main.
 
-The project remains active and incomplete; no completion claim is made while T17 live execution or T19 review is outstanding.
+The project remains active until T19 has no unresolved critical/high findings and all post-review verification passes.
