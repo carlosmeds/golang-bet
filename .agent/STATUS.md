@@ -28,7 +28,8 @@ Orca Run `run_21967f35dd24` is active and the runtime is ready. T11, T16, T17 an
 - T17 starts three independent service processes, creates isolated FIFO queues, exercises replay/race/restart/crash/recovery and reconciles the ledger. It passed independently four times and in the sequential live integration batch.
 - T19 read the immutable `SPEC.md`, full `.agent/REQUIREMENTS.md`, full `.agent/DECISIONS.md` and final integrated code without previous review conclusions. Its per-requirement matrix and findings are in `.agent/handoffs/T19.md`.
 - T19's redrive tests, README correction and ARCHITECTURE correction are integrated in commit `0c770a2`; `WAGERING_TEST_SQS_ENDPOINT=http://localhost:4566 go test -race -count=1 -v ./tests/integration/sqs` passed.
-- Repair tasks R19-F1 (broker security/API audience), R19-F3 (outbox throughput) and R19-F4 (transient HTTP errors) are dispatched. R19-F2 depends on R19-F1; metrics, concurrency coverage, shutdown timeout, inbox replay, reference retry and request-log/module tidy repairs are tracked in Orca. R19-F6 documentation follows the behavior repairs.
+- R19-F4 (transient PostgreSQL errors return HTTP 503 with `Retry-After`) is integrated in `549676b`; focused tests and vet pass. The worker's HTTP integration cases skipped without live endpoint variables, so the root Compose verification must rerun them.
+- R19-F1 (broker security/API audience) and R19-F3 (outbox throughput) are active; R19-F10C (safe request log IDs and tidy) is active on the completed F4 Codex terminal. R19-F2 depends on R19-F1; metrics, concurrency coverage, shutdown timeout, inbox replay, reference retry and documentation repairs are tracked in Orca.
 
 ## Verification
 

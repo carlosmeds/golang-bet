@@ -441,6 +441,7 @@ parallel_sets:
   reasoning_effort: high
   actual_model: sonnet
   orca_task_id: task_60120e3b9d10
+  orca_dispatch_id: ctx_57889572f609
 - id: R19-F2
   state: pending
   title: Preserve valid SQS wagers through database outages
@@ -467,8 +468,9 @@ parallel_sets:
   reasoning_effort: high
   actual_model: gpt-6-sol
   orca_task_id: task_2cbcf6bdae49
+  orca_dispatch_id: ctx_cd927eb08c64
 - id: R19-F4
-  state: active
+  state: complete
   title: Map transient database errors to HTTP 503
   depends_on: []
   parallel_group: adversarial_repairs
@@ -480,6 +482,8 @@ parallel_sets:
   reasoning_effort: medium
   actual_model: gpt-6-sol
   orca_task_id: task_48413ba4eb84
+  orca_dispatch_id: ctx_48d215ebc290
+  commit: 549676b
 - id: R19-F5
   state: pending
   title: Complete required operational metrics
@@ -566,7 +570,7 @@ parallel_sets:
   reasoning_effort: high
   orca_task_id: task_23a4dd64498e
 - id: R19-F10C
-  state: pending
+  state: active
   title: Add missing request identifiers to logs and tidy modules
   depends_on:
   - R19-F4
@@ -578,3 +582,4 @@ parallel_sets:
   model_tier: economy
   reasoning_effort: low
   orca_task_id: task_6d588aca5f6a
+  orca_dispatch_id: ctx_de53c8c0c362
