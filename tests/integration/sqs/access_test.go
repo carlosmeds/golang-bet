@@ -102,13 +102,23 @@ func TestProducerAndServiceIdentitiesAreLeastPrivilege(t *testing.T) {
 	if err := attrs(producer, inbound); err != nil {
 		t.Errorf("producer cannot read inbound attributes: %v", err)
 	}
+	// The metrics poller follows the inbound redrive policy and reads the
+	// configured DLQ's visible-message count using the app identity.
+	dlqResult, err := app.GetQueueUrl(ctx, &sqs.GetQueueUrlInput{QueueName: aws.String(brokertest.DLQ)})
+	if err != nil {
+		t.Fatalf("service cannot resolve the configured DLQ for metrics: %v", err)
+	}
+	if _, err := app.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{QueueUrl: dlqResult.QueueUrl, AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameApproximateNumberOfMessages}}); err != nil {
+		t.Fatalf("service cannot read DLQ metrics: %v", err)
+	}
 	// What it does not need is refused.
 	for name, err := range map[string]error{
 		"producer receives inbound":       receive(producer, inbound),
 		"producer publishes events":       sendTo(producer, events, "x"),
 		"producer creates queues":         createQueueErr(producer),
 		"service receives its own events": receive(app, events),
-		"service reads the DLQ":           receive(app, brokertest.QueueURL(endpoint, brokertest.DLQ)),
+		"service receives from the DLQ":   receive(app, aws.ToString(dlqResult.QueueUrl)),
+		"service publishes to the DLQ":    sendTo(app, aws.ToString(dlqResult.QueueUrl), "x"),
 		"service creates queues":          createQueueErr(app),
 	} {
 		if !denied(err) {

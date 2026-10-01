@@ -60,7 +60,10 @@ cat > "$workdir/app.json" <<EOF
    "Resource":"$(arn "$INBOUND")"},
   {"Sid":"PublishEvents","Effect":"Allow",
    "Action":["sqs:SendMessage","sqs:GetQueueUrl","sqs:GetQueueAttributes"],
-   "Resource":"$(arn "$EVENTS")"}]}
+   "Resource":"$(arn "$EVENTS")"},
+  {"Sid":"ReadDeadLetterMetrics","Effect":"Allow",
+   "Action":["sqs:GetQueueUrl","sqs:GetQueueAttributes"],
+   "Resource":"$(arn "$DLQ")"}]}
 EOF
 cat > "$workdir/operator.json" <<EOF
 {"Version":"2012-10-17","Statement":[
