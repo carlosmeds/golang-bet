@@ -40,25 +40,26 @@ Orca Run `run_21967f35dd24` is active and the runtime is ready. T11, T16, T17 an
 - R19-F5 metrics is integrated as `17ae50b`. In the final Compose app, HTTP and SQS latency/outcome series changed, and the real snapshot poll read an actual DLQ count from 1 to 0 after the test message was purged; unpublished outbox gauges also scraped as expected.
 - R19-F12 is integrated as `b522ec4`. The signed app identity can resolve and read only the configured DLQ's attributes; the live least-privilege integration test confirms it cannot receive from or publish to the DLQ. The full SQS integration package passed under `-race -p 1` against the final stack.
 - Antigravity was attempted for F5 first but reported not signed in; Codex GPT-6-Sol medium completed the task.
-- R19-F6 documentation remains in the repair DAG.
-- R19-F11 is active in Codex GPT-6-Sol high, repeating the commit-before-delete/restart scenario at least ten times through the private SQS gateway and direct broker to explain and close the earlier race-detector flake. The first supervised startup timed out at readiness; its owned terminal was released and the task was injected into a verified Codex terminal (`ctx_e2ed83a1c28c`) per D44.
+- R19-F6 documentation is active in Claude Sonnet 5.5 medium in the isolated `r19f6` Orca worktree (`ctx_d7d734e127ae`). Two Codex startup attempts timed out before accepting the Task; Orca released their terminals, and the task was retried with Claude. The worker is checking the live code/config and the specified requirement/decision context before updating README and ARCHITECTURE.
+- R19-F11 is integrated as `997a1cd`. Three service processes now start and pass readiness sequentially, the crash marker must match the broker's message ID, the faulted process must be alive and forcibly killed, a restarted process must log the idempotent replay, and the wallet is reconciled against the ledger. The full live T17 system suite passed ten consecutive `-race` runs through both the private SQS gateway and direct broker (20 full runs total); each run passed all six scenarios, including crash/redelivery, pending-reference restart and outbox lease recovery. `go vet ./tests/system` and `git diff --check` passed. The Codex terminal hit its usage limit before reporting completion through Orca, so the Lead inspected its diff/handoff, committed the work, and integrated it.
 
 ## Verification
 
 - Passed: `gofmt` over all Go files, `go vet ./...`, `go test ./...`, and `go test -race ./...`.
 - Passed: `docker compose config`, `docker compose up -d --build --wait`; PostgreSQL, Keycloak, MiniStack and the application reported healthy. `GET /health/ready` returned `ready`.
-- Passed: live system suite under `-race`, including 50 duplicate requests through three processes, two competing 80 BETs against balance 100, independent wallets, HTTP/SQS replay crossing, inbox commit-before-delete crash/redelivery, pending-reference resolution after restart, outbox lease recovery in another process, and final ledger reconciliation.
+- Passed: live system suite under `-race`, including 50 duplicate requests through three processes, two competing 80 BETs against balance 100, independent wallets, HTTP/SQS replay crossing, inbox commit-before-delete crash/redelivery, pending-reference resolution after restart, outbox lease recovery in another process, and final ledger reconciliation. R19-F11 repeated the full six-scenario system suite ten times through each of the private gateway and direct broker endpoints.
 - Passed: real live integration batch with `-race -p 1`: `./tests/...`, `./internal/storage/pg`, `./internal/workers/reference`, and `./internal/workers/outbox`.
 - Passed: R18 real Keycloak/PostgreSQL auth and HTTP tests under `-race`, including SQS-backed readiness and metrics.
 - Passed: real migration CLI smoke on a disposable PostgreSQL database: up, down one migration, up, then drop the scratch database.
 - One live integration batch using default package parallelism timed out before the T17 consumer crash marker while auth/HTTP and database packages passed. T17 independently passed four times, and the full live batch passed with `-p 1`; README documents that setting for shared Compose services.
 - `git diff --check` passed before the latest status/decision documentation update; rerun it before final commit.
+- After R19-F11 integration, `gofmt` over all Go files, `go vet ./...`, `go vet -tags systemfault ./...`, `go test ./...`, `go test -tags systemfault ./...`, and `go test -race ./...` passed. These root-package runs do not activate the opt-in live integration endpoints; separate live Compose/SQS and T17 evidence is listed above.
 
 ## Remaining work
 
-1. Integrate and verify all valid T19 repairs, including missing system concurrency cases and HTTP/SQS live coverage.
-2. Complete the documentation and requirements evidence updates after the implementation changes settle.
-3. Rerun gofmt, both vet configurations, unit/race tests, the live Compose integration suites, T17 multi-process recovery and Compose startup/readiness.
+1. Complete R19-F6 documentation and requirements evidence updates.
+2. Rerun gofmt, both vet configurations, unit/race tests, the live Compose integration suites, T17 multi-process recovery and Compose startup/readiness.
+3. Run a new independent final adversarial review against the immutable specification after all repairs and verification; repair any valid findings and repeat affected gates.
 4. Commit the final local integration branch cleanly. Do not push or merge into main.
 
 The project remains active until T19 has no unresolved critical/high findings and all post-review verification passes.
