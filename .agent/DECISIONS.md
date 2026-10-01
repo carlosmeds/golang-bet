@@ -107,3 +107,6 @@ R19-F2 added a bounded PostgreSQL ping before each SQS receive. When the databas
 
 ### D49 — Use Codex for metrics when Antigravity is signed out
 R19-F5 was initially assigned to Antigravity because it is bounded observability instrumentation and test work. The live Antigravity CLI explicitly reported that it was not signed in and did not start the task. The unstarted Dispatch was abandoned without stopping the visible terminal; the same Orca Task was returned to ready and injected into Codex GPT-6-Sol medium. The worker allocation in `.agent/TASKS.yaml` records the actual fallback and Dispatch. Antigravity should be reconsidered only if its login becomes available in this environment.
+
+### D50 — Require the current due reference lease at the financial transaction boundary
+R19-F10B changes `RetryPending` to require a nonempty lease owner and checks, after wallet and transaction row locks are held, that this owner still holds an unexpired lease and `next_attempt_at` is due. The check uses PostgreSQL `clock_timestamp()`, matching claim and expiry decisions. Stale/early attempts return a no-effect stale result before consuming retry budget or applying ledger/outbox changes; already-terminal rows still replay safely. Worker and repository races, wrong-owner attempts, early schedules and attempt-budget preservation pass live PostgreSQL race tests.
