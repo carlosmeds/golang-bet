@@ -280,6 +280,46 @@ func TestClaimedEventsCarryTheOutboxSequence(t *testing.T) {
 	}
 }
 
+func TestSingleAggregateBacklogDrainsWithoutPollDelay(t *testing.T) {
+	e := newEnv(t)
+	agg := domain.NewUUID()
+	const backlog = 6
+	ids := make([]domain.UUID, backlog)
+	for i := range ids {
+		ids[i] = e.insert(agg, i)
+	}
+	q := &sink{}
+	cfg := testConfig("pub-a")
+	cfg.PollInterval = 2 * time.Second
+	cfg.BatchSize = 10 // SQL can claim only the earliest unpublished event.
+	p := e.publisher(e.store, cfg, q)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() { done <- p.Run(ctx) }()
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	for len(q.all()) < backlog && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	elapsed := time.Since(start)
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	msgs := q.all()
+	if len(msgs) != backlog || elapsed >= 1500*time.Millisecond {
+		t.Fatalf("published %d/%d events in %s with a 2s poll interval", len(msgs), backlog, elapsed)
+	}
+	for i, m := range msgs {
+		if m.EventID != ids[i] || m.MessageDeduplicationID != ids[i].String() || m.MessageGroupID != agg.String() {
+			t.Errorf("message %d identity/order: %+v, want %s", i, m, ids[i])
+		}
+	}
+	if n := e.publishedCount(); n != backlog {
+		t.Fatalf("published rows %d, want %d", n, backlog)
+	}
+}
+
 func TestConcurrentClaimsNeverOverlap(t *testing.T) {
 	e := newEnv(t)
 	for i := 0; i < 60; i++ {
@@ -328,10 +368,13 @@ func TestTwoPublishersPublishEachEventExactlyOnce(t *testing.T) {
 	e := newEnv(t)
 	const aggregates, perAggregate = 12, 5
 	want := map[domain.UUID]int{}
+	order := map[string][]domain.UUID{}
 	for a := 0; a < aggregates; a++ {
 		agg := domain.NewUUID()
 		for n := 0; n < perAggregate; n++ {
-			want[e.insert(agg, n)] = n
+			id := e.insert(agg, n)
+			want[id] = n
+			order[agg.String()] = append(order[agg.String()], id)
 		}
 	}
 	q := &sink{fn: func(ctx context.Context, m outbox.Message) error {
@@ -364,6 +407,15 @@ func TestTwoPublishersPublishEachEventExactlyOnce(t *testing.T) {
 	}
 	if got := len(q.all()); got != len(want) {
 		t.Errorf("sent %d messages for %d events", got, len(want))
+	}
+	positions := map[string]int{}
+	for _, m := range q.all() {
+		position := positions[m.MessageGroupID]
+		ids := order[m.MessageGroupID]
+		if position >= len(ids) || m.EventID != ids[position] {
+			t.Errorf("aggregate %s event at position %d was %s, want ordered sequence %v", m.MessageGroupID, position, m.EventID, ids)
+		}
+		positions[m.MessageGroupID]++
 	}
 }
 

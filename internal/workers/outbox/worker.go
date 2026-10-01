@@ -362,8 +362,10 @@ func (p *Publisher) run(claimCtx, itemParent context.Context) error {
 		if err != nil && claimCtx.Err() == nil {
 			p.log.Error("claim failed", "error", err)
 		}
-		if err == nil && st.Claimed >= p.cfg.BatchSize && st.Skipped == 0 {
-			continue // a full, fully processed batch suggests more due work
+		if err == nil && (st.Published > 0 || (st.Claimed >= p.cfg.BatchSize && st.Skipped == 0)) {
+			// Publishing an aggregate head can make its next event claimable,
+			// even when this pass claimed fewer than BatchSize rows.
+			continue
 		}
 		t := time.NewTimer(p.cfg.PollInterval)
 		select {
