@@ -438,7 +438,7 @@ tasks:
   orca_dispatch_id: ctx_48d215ebc290
   commit: 549676b
 - id: R19-F5
-  state: pending
+  state: active
   title: Complete required operational metrics
   depends_on:
   - R19-F3
@@ -451,6 +451,8 @@ tasks:
   model_tier: standard
   reasoning_effort: medium
   orca_task_id: task_31c9bf654ad2
+  orca_dispatch_id: ctx_de27970ad737
+  actual_model: gpt-6-sol
 - id: R19-F6
   state: pending
   title: Complete public architecture and operational contracts

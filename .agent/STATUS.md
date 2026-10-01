@@ -36,7 +36,7 @@ Orca Run `run_21967f35dd24` is active and the runtime is ready. T11, T16, T17 an
 - R19-F3 (ordered outbox throughput) is integrated as `4c66491`; a six-event same-wallet PostgreSQL backlog drains in about 0.13 seconds despite a two-second poll interval, and two-publisher ordering/stable identity tests pass under `-race`.
 - R19-F7 (independent-wallet progress, concurrent HTTP/SQS same-key race and post-80/80 replays) has been dispatched to Codex GPT-6-Sol high in `r19f7`. R19-F11 will stabilize T17 crash-window race failures after F7.
 - R19-F10A inbox identity is active in Codex GPT-6-Sol high after two supervised readiness timeouts; the failed owned Dispatches were released and a verified Orca Codex terminal received the task through `orchestration dispatch --inject` per D44.
-- R19-F10B reference retry is active in Claude Sonnet 5.5 high. R19-F5 metrics and R19-F6 documentation remain in the repair DAG.
+- R19-F10B reference retry is active in Claude Sonnet 5.5 high. R19-F5 metrics was assigned to Antigravity first, but its CLI reported “not signed in.” I abandoned that unstarted Dispatch without stopping the terminal and moved the same task to Codex GPT-6-Sol medium in `r19f5` (`ctx_de27970ad737`). R19-F6 documentation remains in the repair DAG.
 
 ## Verification
 
