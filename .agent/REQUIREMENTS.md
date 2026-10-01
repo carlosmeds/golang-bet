@@ -96,7 +96,8 @@
 This is an implementation checkpoint, not a completion claim. The verification target column above remains authoritative for final acceptance.
 
 - REQ-058: `/health/live` and `/health/ready` handlers now exist; readiness pings PostgreSQL and checks inbound SQS attributes. Live checks still need Compose verification.
-- REQ-057, REQ-075, REQ-076: reconciliation divergence logging/metrics and current safe identifiers are present. R19-F10C added validated body IDs to wagering request logs and made `go mod tidy -diff` clean; its focused tests pass. T19 also verified that outcome/source counters, worker processing latency, unpublished outbox count/age and actual DLQ visibility are not covered. These metric gaps remain open under R19-F5; final integrated/live evidence is still pending.
+- REQ-057/075: reconciliation divergence logging/metrics and safe request identifiers are present. R19-F10C added validated body IDs to wagering request logs and made `go mod tidy -diff` clean; focused tests pass.
+- REQ-076: R19-F5 adds fixed-cardinality `source,status` financial counters; per-source processing duration totals/counts; and periodically sampled unpublished-outbox count/oldest age and visible DLQ count. Unit race tests cover snapshots and an HTTP `/metrics` scrape; snapshot dependencies used fakes. Confirm all series against the fully integrated real Compose process before marking this requirement verified.
 - REQ-006: embedded up/down migration runner and `cmd/migrate` exist; package compiles. Real reversal cycle still needs PostgreSQL verification in this sandbox.
 - REQ-068/069/070: outbox claim/order/retry/publish implementation and PostgreSQL tests are present; live crash and ordering tests pass with `-race` after aligning assertions to one-head-per-aggregate claims.
 - REQ-052/059/060/061: auth and HTTP integration suites pass with live Keycloak/PostgreSQL under `-race`; repair R18 updates the harness to current SQS/metrics dependencies.

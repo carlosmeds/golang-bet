@@ -438,7 +438,7 @@ tasks:
   orca_dispatch_id: ctx_48d215ebc290
   commit: 549676b
 - id: R19-F5
-  state: active
+  state: complete
   title: Complete required operational metrics
   depends_on:
   - R19-F3
@@ -453,6 +453,7 @@ tasks:
   orca_task_id: task_31c9bf654ad2
   orca_dispatch_id: ctx_de27970ad737
   actual_model: gpt-6-sol
+  commit: 17ae50b
 - id: R19-F6
   state: pending
   title: Complete public architecture and operational contracts
@@ -563,7 +564,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
   orca_task_id: task_169caccb7d64
-  orca_dispatch_id: ctx_bfaac64f3da9
+  orca_dispatch_id: ctx_e2ed83a1c28c
   actual_model: gpt-6-sol
 parallel_sets:
 - after: []
