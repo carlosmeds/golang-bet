@@ -35,7 +35,8 @@ Orca Run `run_21967f35dd24` is active and the runtime is ready. T11, T16, T17 an
 - R19-F2 (SQS retries through database outages) is integrated as `e407cc6`; real SQS tests verify outages pause receives, and a private Compose acceptance test stopped PostgreSQL for about 20 seconds, then verified one commit after recovery and poison-message redrive. The live stack must be recreated to load `maxReceiveCount=15`; persistent commit errors with a healthy PostgreSQL ping retain a documented manual-redrive window of about ten minutes.
 - R19-F3 (ordered outbox throughput) is integrated as `4c66491`; a six-event same-wallet PostgreSQL backlog drains in about 0.13 seconds despite a two-second poll interval, and two-publisher ordering/stable identity tests pass under `-race`.
 - R19-F7 (independent-wallet progress, concurrent HTTP/SQS same-key race and post-80/80 replays) has been dispatched to Codex GPT-6-Sol high in `r19f7`. R19-F11 will stabilize T17 crash-window race failures after F7.
-- R19-F5 metrics, R19-F10A inbox identity, R19-F10B reference retry and R19-F6 documentation remain in the repair DAG.
+- R19-F10A inbox identity is active in Codex GPT-6-Sol high after two supervised readiness timeouts; the failed owned Dispatches were released and a verified Orca Codex terminal received the task through `orchestration dispatch --inject` per D44.
+- R19-F10B reference retry is active in Claude Sonnet 5.5 high. R19-F5 metrics and R19-F6 documentation remain in the repair DAG.
 
 ## Verification
 

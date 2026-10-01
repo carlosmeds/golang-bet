@@ -503,7 +503,7 @@ tasks:
   orca_dispatch_id: ctx_2104afb83cbf
   commit: 7d1906f
 - id: R19-F10A
-  state: pending
+  state: active
   title: Persist inbox identity on concurrent idempotency replay
   depends_on: []
   parallel_group: adversarial_repairs
@@ -514,8 +514,10 @@ tasks:
   model_tier: standard
   reasoning_effort: high
   orca_task_id: task_57b42ce79c79
+  orca_dispatch_id: ctx_5994a533c8cd
+  actual_model: gpt-6-sol
 - id: R19-F10B
-  state: pending
+  state: active
   title: Honor reference retry leases and schedules
   depends_on: []
   parallel_group: adversarial_repairs
@@ -526,6 +528,8 @@ tasks:
   model_tier: standard
   reasoning_effort: high
   orca_task_id: task_23a4dd64498e
+  orca_dispatch_id: ctx_cee02a17d020
+  actual_model: claude-sonnet-5-5
 - id: R19-F10C
   state: complete
   title: Add missing request identifiers to logs and tidy modules
