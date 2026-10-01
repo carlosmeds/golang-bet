@@ -52,6 +52,7 @@ type system struct {
 	apps                           []*process
 	client                         *http.Client
 	internal, provider, providerID string
+	keycloak                       string
 	queue, events                  string
 	sqs                            *sqs.Client
 }
@@ -72,6 +73,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	}
 
 	t.Run("50 duplicate BETs through three independent processes", func(t *testing.T) {
+		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "100.00")
 		op := s.operation("race-50", wallet, player, "BET", "1.00")
 		body := mustJSON(t, op)
@@ -96,6 +98,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	})
 
 	t.Run("two 80 BETs compete for 100 and independent wallets proceed", func(t *testing.T) {
+		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "100.00")
 		ops := [][]byte{mustJSON(t, s.operation("race-80-a", wallet, player, "BET", "80.00")), mustJSON(t, s.operation("race-80-b", wallet, player, "BET", "80.00"))}
 		var codes [2]int
@@ -143,6 +146,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	})
 
 	t.Run("HTTP SQS crossing, commit-before-delete crash, restart replay", func(t *testing.T) {
+		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "50.00")
 		op := s.operation("cross-transport-crash", wallet, player, "BET", "7.00")
 		key := "cross-transport-crash-key"
@@ -191,6 +195,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	})
 
 	t.Run("pending reference resumes after restart and ledger reconciles", func(t *testing.T) {
+		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "50.00")
 		refund := s.operation("refund-arrives-first", wallet, player, "REFUND", "10.00")
 		refund["referenceExternalTransactionId"] = "reference-arrives-later"
@@ -205,6 +210,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		s.apps = append(s.apps, s.start(s.bin, nil))
 		s.ready(s.apps[0])
 		bet := s.operation("reference-arrives-later", wallet, player, "BET", "10.00")
+		bet["roundId"] = refund["roundId"]
 		if code := s.submit(s.apps[0], s.provider, "reference-bet-key", mustJSON(t, bet)); code != http.StatusCreated {
 			t.Fatalf("reference BET status=%d", code)
 		}
@@ -214,6 +220,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	})
 
 	t.Run("claimed outbox recovers into a second publisher process", func(t *testing.T) {
+		s.refreshTokens(t)
 		waitFor(t, 30*time.Second, func() bool { return s.count(t, "SELECT count(*) FROM outbox_events WHERE published_at IS NULL") == 0 })
 		s.stopAll()
 		s.apps = nil
@@ -303,7 +310,13 @@ func newSystem(t *testing.T, adminDSN, kc string) *system {
 	eq := envOr("WAGERING_TEST_EVENT_QUEUE_URL", "http://localhost:4566/000000000000/wager-events.fifo")
 	internal := idptest.Token(t, kc, idptest.Internal)
 	tok := idptest.Token(t, kc, idptest.ProviderA)
-	return &system{t: t, root: root, bin: bin, faultBin: faultBin, dsn: u.String(), pool: pool, client: &http.Client{Timeout: 10 * time.Second}, internal: internal, provider: tok, providerID: "provider-a", queue: q, events: eq, sqs: client}
+	return &system{t: t, root: root, bin: bin, faultBin: faultBin, dsn: u.String(), pool: pool, client: &http.Client{Timeout: 10 * time.Second}, internal: internal, provider: tok, providerID: "provider-a", keycloak: kc, queue: q, events: eq, sqs: client}
+}
+
+func (s *system) refreshTokens(t *testing.T) {
+	t.Helper()
+	s.internal = idptest.Token(t, s.keycloak, idptest.Internal)
+	s.provider = idptest.Token(t, s.keycloak, idptest.ProviderA)
 }
 
 func (s *system) start(bin string, extra map[string]string) *process {
