@@ -534,7 +534,7 @@ parallel_sets:
   actual_model: gpt-6-sol
   orca_task_id: task_b039d9bce492
 - id: R19-F8
-  state: pending
+  state: active
   title: Apply configured shutdown timeout
   depends_on: []
   parallel_group: adversarial_repairs
@@ -545,6 +545,7 @@ parallel_sets:
   model_tier: standard
   reasoning_effort: low
   orca_task_id: task_2755e6abd457
+  orca_dispatch_id: ctx_2104afb83cbf
 - id: R19-F10A
   state: pending
   title: Persist inbox identity on concurrent idempotency replay
@@ -570,7 +571,7 @@ parallel_sets:
   reasoning_effort: high
   orca_task_id: task_23a4dd64498e
 - id: R19-F10C
-  state: active
+  state: complete
   title: Add missing request identifiers to logs and tidy modules
   depends_on:
   - R19-F4
@@ -583,3 +584,4 @@ parallel_sets:
   reasoning_effort: low
   orca_task_id: task_6d588aca5f6a
   orca_dispatch_id: ctx_de53c8c0c362
+  commit: b68334f
