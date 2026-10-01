@@ -64,12 +64,11 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	}
 	kc := idptest.KeycloakURL(t)
 	s := newSystem(t, adminDSN, kc)
-	s.apps = append(s.apps, s.start(s.bin, nil))
-	s.apps = append(s.apps, s.start(s.bin, nil))
-	s.apps = append(s.apps, s.start(s.bin, nil))
 	t.Cleanup(s.stopAll)
-	for _, p := range s.apps {
-		s.ready(p)
+	for i := 0; i < 3; i++ {
+		p := s.start(s.bin, nil)
+		s.apps = append(s.apps, p)
+		s.ready(t, p)
 	}
 
 	t.Run("50 duplicate BETs through three independent processes", func(t *testing.T) {
@@ -215,11 +214,14 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		// The HTTP target polls a separate isolated queue, so the racing SQS
 		// request is necessarily handled by another application process.
 		httpQueue := createTestQueue(s.t, s.sqs, "t17-http-only-")
-		s.apps = append(s.apps, s.start(s.bin, map[string]string{"WAGER_QUEUE_URL": httpQueue}))
-		s.apps = append(s.apps, s.start(s.bin, nil))
-		s.apps = append(s.apps, s.start(s.bin, nil))
-		for _, p := range s.apps {
-			s.ready(p)
+		for i := 0; i < 3; i++ {
+			extra := map[string]string(nil)
+			if i == 0 {
+				extra = map[string]string{"WAGER_QUEUE_URL": httpQueue}
+			}
+			p := s.start(s.bin, extra)
+			s.apps = append(s.apps, p)
+			s.ready(t, p)
 		}
 		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "50.00")
@@ -290,26 +292,23 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		marker := filepath.Join(t.TempDir(), "committed")
 		fault := s.start(s.faultBin, map[string]string{"WAGERING_FAULT_AFTER_COMMIT_MARKER": marker})
 		s.apps = append(s.apps, fault)
-		s.ready(fault)
-		s.sendSQS(t, body, wallet)
+		s.ready(t, fault)
+		sqsID := s.sendSQS(t, body, wallet)
 		waitFile(t, marker, 30*time.Second, fault)
-		if raw, err := os.ReadFile(marker); err != nil || len(raw) == 0 {
-			t.Fatalf("fault marker=%q err=%v", raw, err)
+		if raw, err := os.ReadFile(marker); err != nil || string(raw) != sqsID {
+			t.Fatalf("fault marker=%q want SQS message ID %q err=%v", raw, sqsID, err)
 		}
 		waitFor(t, 10*time.Second, func() bool {
 			return s.count(t, `SELECT count(*) FROM inbox_messages WHERE message_id='`+msgID+`' AND completed_at IS NOT NULL`) == 1
 		})
-		fault.kill(t)
+		fault.killRunning(t)
 		s.apps = nil
 		for i := 0; i < 3; i++ {
-			s.apps = append(s.apps, s.start(s.bin, nil))
+			p := s.start(s.bin, nil)
+			s.apps = append(s.apps, p)
+			s.ready(t, p)
 		}
-		for _, p := range s.apps {
-			s.ready(p)
-		}
-		waitFor(t, 20*time.Second, func() bool {
-			return s.count(t, `SELECT count(*) FROM inbox_messages WHERE message_id='`+msgID+`' AND completed_at IS NOT NULL`) == 1
-		})
+		waitForSQSReplay(t, s.apps, msgID, 20*time.Second)
 		if !s.inboundQueueEmpty(t, 20*time.Second) {
 			t.Fatal("SQS redelivery was not deleted after the already-completed inbox was observed")
 		}
@@ -323,11 +322,12 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		// the original result without a second ledger entry.
 		s.stopAll()
 		s.apps = append(s.apps, s.start(s.bin, nil))
-		s.ready(s.apps[0])
+		s.ready(t, s.apps[0])
 		if code := s.submit(s.apps[0], s.provider, key, mustJSON(t, op)); code != http.StatusOK {
 			t.Fatalf("restart replay status=%d", code)
 		}
 		s.assertWallet(t, wallet, 4300, 2)
+		s.reconcile(t, s.apps[0], wallet)
 	})
 
 	t.Run("pending reference resumes after restart and ledger reconciles", func(t *testing.T) {
@@ -345,7 +345,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		s.stopAll()
 		s.apps = nil
 		s.apps = append(s.apps, s.start(s.bin, nil))
-		s.ready(s.apps[0])
+		s.ready(t, s.apps[0])
 		bet := s.operation("reference-arrives-later", wallet, player, "BET", "10.00")
 		bet["roundId"] = refund["roundId"]
 		if code := s.submit(s.apps[0], s.provider, "reference-bet-key", mustJSON(t, bet)); code != http.StatusCreated {
@@ -365,7 +365,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		marker := filepath.Join(t.TempDir(), "claimed")
 		fault := s.start(s.faultBin, map[string]string{"WAGERING_FAULT_AFTER_OUTBOX_CLAIM_MARKER": marker})
 		s.apps = append(s.apps, fault)
-		s.ready(fault)
+		s.ready(t, fault)
 		wallet, _ := s.openWallet(t, fault, "2.00")
 		waitFile(t, marker, 20*time.Second)
 		pendingIDs := s.eventIDs(t, wallet)
@@ -374,7 +374,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		}
 		second := s.start(s.bin, nil)
 		s.apps = append(s.apps, second)
-		s.ready(second)
+		s.ready(t, second)
 		time.Sleep(300 * time.Millisecond)
 		for _, id := range pendingIDs {
 			if s.count(t, `SELECT count(*) FROM outbox_events WHERE event_id='`+id+`' AND published_at IS NOT NULL`) > 0 {
@@ -493,7 +493,7 @@ func (s *system) ensureApps(t *testing.T, count int) {
 	for len(s.apps) < count {
 		p := s.start(s.bin, nil)
 		s.apps = append(s.apps, p)
-		s.ready(p)
+		s.ready(t, p)
 	}
 }
 
@@ -537,14 +537,14 @@ func (s *system) start(bin string, extra map[string]string) *process {
 	return p
 }
 
-func (s *system) ready(p *process) {
-	s.t.Helper()
+func (s *system) ready(t *testing.T, p *process) {
+	t.Helper()
 	until := time.Now().Add(30 * time.Second)
 	for time.Now().Before(until) {
 		select {
 		case <-p.done:
 			raw, _ := os.ReadFile(p.logPath)
-			s.t.Fatalf("process exited before readiness: %v\n%s", p.waitErr, raw)
+			t.Fatalf("process exited before readiness: %v\n%s", p.waitErr, raw)
 		default:
 		}
 		req, e := http.NewRequest(http.MethodGet, p.base+"/health/ready", nil)
@@ -561,7 +561,21 @@ func (s *system) ready(p *process) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	raw, _ := os.ReadFile(p.logPath)
-	s.t.Fatalf("process failed readiness\n%s", raw)
+	t.Fatalf("process failed readiness\n%s", raw)
+}
+
+// killRunning requires the faulted process to still be alive at the marker.
+// A clean or unrelated exit cannot count as the forced crash under test.
+func (p *process) killRunning(t *testing.T) {
+	t.Helper()
+	if err := p.cmd.Process.Kill(); err != nil {
+		t.Fatalf("faulted process was not running at crash point: %v", err)
+	}
+	select {
+	case <-p.done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("faulted process %s did not exit after kill", p.base)
+	}
 }
 func (p *process) kill(t *testing.T) {
 	t.Helper()
@@ -658,12 +672,13 @@ func (s *system) request(p *process, method, path, token, key string, body []byt
 	b, _ := io.ReadAll(r.Body)
 	return response{r.StatusCode, b}
 }
-func (s *system) sendSQS(t *testing.T, body []byte, wallet string) {
+func (s *system) sendSQS(t *testing.T, body []byte, wallet string) string {
 	t.Helper()
-	_, e := s.sqs.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: aws.String(s.queue), MessageBody: aws.String(string(body)), MessageGroupId: aws.String(wallet), MessageDeduplicationId: aws.String(randomID(t))})
+	out, e := s.sqs.SendMessage(context.Background(), &sqs.SendMessageInput{QueueUrl: aws.String(s.queue), MessageBody: aws.String(string(body)), MessageGroupId: aws.String(wallet), MessageDeduplicationId: aws.String(randomID(t))})
 	if e != nil {
 		t.Fatalf("send test SQS wager: %v", e)
 	}
+	return aws.ToString(out.MessageId)
 }
 
 func (s *system) inboundQueueEmpty(t *testing.T, timeout time.Duration) bool {
@@ -861,6 +876,47 @@ func waitFile(t *testing.T, path string, d time.Duration, processes ...*process)
 		}
 	}
 	t.Fatalf("marker %s not created within %s%s", path, d, logs.String())
+}
+
+func waitForSQSReplay(t *testing.T, processes []*process, messageID string, timeout time.Duration) {
+	t.Helper()
+	type event struct {
+		Message string `json:"msg"`
+		ID      string `json:"messageId"`
+		Replay  bool   `json:"idempotentReplay"`
+	}
+	until := time.Now().Add(timeout)
+	for time.Now().Before(until) {
+		for _, p := range processes {
+			raw, err := os.ReadFile(p.logPath)
+			if err != nil {
+				continue
+			}
+			for _, line := range strings.Split(string(raw), "\n") {
+				var e event
+				if json.Unmarshal([]byte(line), &e) != nil {
+					continue
+				}
+				if e.Message == "SQS wager durably processed" && e.ID == messageID && e.Replay {
+					return
+				}
+				// Fx's slog bridge may format the record as one message string.
+				if strings.Contains(e.Message, "SQS wager durably processed") && strings.Contains(e.Message, "messageId="+messageID+" ") && strings.Contains(e.Message, "idempotentReplay=true") {
+					return
+				}
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var logs strings.Builder
+	for _, p := range processes {
+		raw, _ := os.ReadFile(p.logPath)
+		if len(raw) > 4096 {
+			raw = raw[len(raw)-4096:]
+		}
+		fmt.Fprintf(&logs, "\nprocess %s log tail:\n%s", p.base, raw)
+	}
+	t.Fatalf("no restarted process logged SQS replay for message %s within %s%s", messageID, timeout, logs.String())
 }
 func waitFor(t *testing.T, d time.Duration, condition func() bool) {
 	t.Helper()
