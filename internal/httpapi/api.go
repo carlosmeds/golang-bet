@@ -145,6 +145,9 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 	var de *domain.Error
 	if errors.As(err, &de) {
 		status, body := contract.HTTPError(err, correlation(r))
+		if status == http.StatusServiceUnavailable {
+			w.Header().Set("Retry-After", "5")
+		}
 		respond(w, status, body)
 		return
 	}
@@ -159,7 +162,7 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 		status = http.StatusConflict
 		body.Code = "CONFLICT"
 		body.Message = "resource identity conflicts with an existing record"
-	case errors.Is(err, r.Context().Err()) && r.Context().Err() != nil:
+	case pg.IsTransient(err), errors.Is(err, r.Context().Err()) && r.Context().Err() != nil:
 		status = http.StatusServiceUnavailable
 		body.Code = "TEMPORARILY_UNAVAILABLE"
 		body.Message = "temporarily unavailable"
@@ -170,6 +173,9 @@ func fail(w http.ResponseWriter, r *http.Request, err error) {
 			body.Code = "CONFLICT"
 			body.Message = "resource identity conflicts with an existing record"
 		}
+	}
+	if status == http.StatusServiceUnavailable {
+		w.Header().Set("Retry-After", "5")
 	}
 	respond(w, status, body)
 }
