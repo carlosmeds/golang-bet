@@ -304,57 +304,6 @@ tasks:
   agent: antigravity
   model_tier: standard
   reasoning_effort: medium
-parallel_sets:
-- after: []
-  can_run:
-  - T01
-  - T02
-  - T03
-- after:
-  - T01
-  - T03
-  can_run:
-  - T04
-  - T12
-- after:
-  - T01
-  - T02
-  - T03
-  - T04
-  can_run:
-  - T05
-  - T06
-  - T12
-- after:
-  - T01
-  - T02
-  - T03
-  - T04
-  - T05
-  - T06
-  - T07
-  - T12
-  can_run:
-  - T08
-  - T09
-  - T10
-  - T11
-  - T14
-  - T18
-- after:
-  - T01
-  - T05
-  - T07
-  - T08
-  - T09
-  - T10
-  - T11
-  - T12
-  can_run:
-  - T13
-  - T15
-  - T16
-- id: R13
   state: complete
   title: Repair real Keycloak claims and broker policy
   depends_on:
@@ -429,7 +378,7 @@ parallel_sets:
   model_tier: standard
   reasoning_effort: medium
 - id: R19-F1
-  state: active
+  state: complete
   title: Secure broker publishing and tighten API audience
   depends_on: []
   parallel_group: adversarial_repairs
@@ -442,8 +391,9 @@ parallel_sets:
   actual_model: sonnet
   orca_task_id: task_60120e3b9d10
   orca_dispatch_id: ctx_57889572f609
+  commit: 8237837
 - id: R19-F2
-  state: pending
+  state: active
   title: Preserve valid SQS wagers through database outages
   depends_on:
   - R19-F1
@@ -455,6 +405,7 @@ parallel_sets:
   model_tier: standard
   reasoning_effort: high
   orca_task_id: task_5e1c3eecb14d
+  orca_dispatch_id: ctx_af2dbff62ff8
 - id: R19-F3
   state: active
   title: Improve ordered outbox throughput
@@ -512,6 +463,7 @@ parallel_sets:
   - R19-F10A
   - R19-F10B
   - R19-F10C
+  - R19-F11
   parallel_group: release_documentation
   owner_area: README.md, ARCHITECTURE.md
   deliverables: Business/error contracts, money/hash normalization, state machine, reversal/reference/SQS/outbox contracts and limitations
@@ -521,7 +473,7 @@ parallel_sets:
   reasoning_effort: medium
   orca_task_id: task_94b6d40c5564
 - id: R19-F7
-  state: pending
+  state: active
   title: Add missing independent-wallet and cross-transport races
   depends_on: []
   parallel_group: adversarial_repairs
@@ -533,8 +485,9 @@ parallel_sets:
   reasoning_effort: high
   actual_model: gpt-6-sol
   orca_task_id: task_b039d9bce492
+  orca_dispatch_id: ctx_da112037687d
 - id: R19-F8
-  state: active
+  state: complete
   title: Apply configured shutdown timeout
   depends_on: []
   parallel_group: adversarial_repairs
@@ -546,6 +499,7 @@ parallel_sets:
   reasoning_effort: low
   orca_task_id: task_2755e6abd457
   orca_dispatch_id: ctx_2104afb83cbf
+  commit: 7d1906f
 - id: R19-F10A
   state: pending
   title: Persist inbox identity on concurrent idempotency replay
@@ -585,3 +539,66 @@ parallel_sets:
   orca_task_id: task_6d588aca5f6a
   orca_dispatch_id: ctx_de53c8c0c362
   commit: b68334f
+- id: R19-F11
+  state: pending
+  title: Stabilize T17 crash-window scenarios under the race detector
+  depends_on:
+  - R19-F7
+  parallel_group: final_system_verification
+  owner_area: tests/system/ and crash test helpers
+  deliverables: Deterministic commit-before-delete crash and redelivery assertions
+  done_when: Ten repeated live -race runs pass through the gateway and direct broker, or a concrete environment limitation is documented
+  agent: codex
+  model_tier: standard
+  reasoning_effort: high
+  orca_task_id: task_169caccb7d64
+parallel_sets:
+- after: []
+  can_run:
+  - T01
+  - T02
+  - T03
+- after:
+  - T01
+  - T03
+  can_run:
+  - T04
+  - T12
+- after:
+  - T01
+  - T02
+  - T03
+  - T04
+  can_run:
+  - T05
+  - T06
+  - T12
+- after:
+  - T01
+  - T02
+  - T03
+  - T04
+  - T05
+  - T06
+  - T07
+  - T12
+  can_run:
+  - T08
+  - T09
+  - T10
+  - T11
+  - T14
+  - T18
+- after:
+  - T01
+  - T05
+  - T07
+  - T08
+  - T09
+  - T10
+  - T11
+  - T12
+  can_run:
+  - T13
+  - T15
+  - T16

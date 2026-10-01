@@ -30,7 +30,11 @@ Orca Run `run_21967f35dd24` is active and the runtime is ready. T11, T16, T17 an
 - T19's redrive tests, README correction and ARCHITECTURE correction are integrated in commit `0c770a2`; `WAGERING_TEST_SQS_ENDPOINT=http://localhost:4566 go test -race -count=1 -v ./tests/integration/sqs` passed.
 - R19-F4 (transient PostgreSQL errors return HTTP 503 with `Retry-After`) is integrated in `549676b`; focused tests and vet pass. The worker's HTTP integration cases skipped without live endpoint variables, so the root Compose verification must rerun them.
 - R19-F10C (safe request log IDs and module tidy) is integrated in `b68334f`; focused tests, race, vet and `go mod tidy -diff` pass. Its live HTTP cases skipped without endpoint variables and will be rerun with Compose.
-- R19-F1 (broker security/API audience), R19-F3 (outbox throughput) and R19-F8 (shutdown timeout) are active. R19-F2 depends on R19-F1; metrics, concurrency coverage, inbox replay, reference retry and documentation repairs are tracked in Orca.
+- R19-F1 (broker ingress boundary/API audience) is integrated as `8237837`; live unauthorized sends are rejected and the authorized producer/consumer path passed against the private Compose broker. MiniStack does not verify SigV4 signatures; see D45 for the local emulator boundary.
+- R19-F8 (configured Fx shutdown timeout) is integrated as `7d1906f`; lifecycle, worker and vet checks passed.
+- R19-F2 (SQS retries through database outages) is active in Orca. R19-F3 (ordered outbox throughput) is active in Codex; its focused PostgreSQL race tests pass and it is resolving completion reporting after finding the pre-existing system crash-window flake.
+- R19-F7 (independent-wallet progress, concurrent HTTP/SQS same-key race and post-80/80 replays) has been dispatched to Codex GPT-6-Sol high in `r19f7`. R19-F11 will stabilize T17 crash-window race failures after F7.
+- R19-F5 metrics, R19-F10A inbox identity, R19-F10B reference retry and R19-F6 documentation remain in the repair DAG.
 
 ## Verification
 
@@ -45,7 +49,7 @@ Orca Run `run_21967f35dd24` is active and the runtime is ready. T11, T16, T17 an
 
 ## Remaining work
 
-1. Integrate and verify all valid T19 repairs, including the missing system concurrency cases.
+1. Integrate and verify all valid T19 repairs, including missing system concurrency cases and HTTP/SQS live coverage.
 2. Complete the documentation and requirements evidence updates after the implementation changes settle.
 3. Rerun gofmt, both vet configurations, unit/race tests, the live Compose integration suites, T17 multi-process recovery and Compose startup/readiness.
 4. Commit the final local integration branch cleanly. Do not push or merge into main.
