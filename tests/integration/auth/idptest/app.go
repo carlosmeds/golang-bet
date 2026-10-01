@@ -21,13 +21,15 @@ import (
 	"wagering/internal/config"
 	"wagering/internal/domain"
 	"wagering/internal/httpapi"
+	"wagering/internal/messaging/sqsclient"
+	"wagering/internal/observability"
 	"wagering/internal/storage/pg"
 	"wagering/internal/workers/reference"
 )
 
-// App is the real service (Fx composition of pg, auth, reference worker and
-// HTTP modules, listening on a real TCP port) wired to the real Keycloak and a
-// scratch PostgreSQL database that exists only for one test.
+// App is the real service (Fx composition of pg, auth, reference worker, SQS,
+// observability and HTTP modules, listening on a real TCP port) wired to the
+// real Keycloak and a scratch PostgreSQL database that exists only for one test.
 type App struct {
 	t        testing.TB
 	BaseURL  string
@@ -77,17 +79,24 @@ func StartApp(t *testing.T) *App {
 
 	t.Setenv("OIDC_JWKS_URL", "") // force discovery through the issuer
 	t.Setenv("OIDC_PROVIDER_CLAIM", "")
+	t.Setenv("AWS_ACCESS_KEY_ID", "test")
+	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
+	sqsEndpoint := strings.TrimRight(os.Getenv("WAGERING_TEST_SQS_ENDPOINT"), "/")
+	if sqsEndpoint == "" {
+		sqsEndpoint = "http://localhost:4566"
+	}
 	cfg := config.Config{
 		HTTPAddr:        addr,
 		DatabaseURL:     u.String(),
 		AWSRegion:       "us-east-1",
-		WagerQueueURL:   "http://localhost:4566/000000000000/wager-transactions.fifo",
-		EventQueueURL:   "http://localhost:4566/000000000000/wager-events.fifo",
+		SQSEndpoint:     sqsEndpoint,
+		WagerQueueURL:   sqsEndpoint + "/000000000000/wager-transactions.fifo",
+		EventQueueURL:   sqsEndpoint + "/000000000000/wager-events.fifo",
 		OIDCIssuerURL:   Issuer(kc),
 		OIDCAudience:    Audience,
 		ShutdownTimeout: 10 * time.Second,
 	}
-	app := fx.New(fx.NopLogger, fx.Supply(cfg), pg.Module, auth.Module, reference.Module, httpapi.Module)
+	app := fx.New(fx.NopLogger, fx.Supply(cfg), observability.Module, pg.Module, auth.Module, reference.Module, sqsclient.Module, httpapi.Module)
 	if err := app.Err(); err != nil {
 		t.Fatalf("compose service: %v", err)
 	}
