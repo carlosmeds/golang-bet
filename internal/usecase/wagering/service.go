@@ -15,6 +15,10 @@ import (
 )
 
 var ErrExternalIDConflict = errors.New("external transaction id reused with another idempotency key")
+
+// ErrClaimNotHeld means a reference retry arrived without a live lease owned by
+// the caller on a due row. It is returned before any write.
+var ErrClaimNotHeld = errors.New("reference retry claim is not held by the caller or not due")
 var ErrInboxIncomplete = errors.New("inbox receipt has no completed transaction")
 
 type Inbox struct{ Consumer, MessageID, PayloadHash string }
@@ -197,9 +201,16 @@ func writeInbox(ctx context.Context, tx *pg.Tx, in Inbox, transaction domain.UUI
 	return tx.CompleteInbox(ctx, in.Consumer, in.MessageID, transaction, now)
 }
 
-// Retry resumes one durably pending reference under its wallet lock. A worker
-// may claim it first; stale claims observe the final state and perform no effect.
-func (s *Service) RetryPending(ctx context.Context, id domain.UUID) (Result, error) {
+// RetryPending resumes one durably pending reference under its wallet lock. The
+// caller must be the current lease owner (see pg.Store.ClaimTransactions) and
+// the row must be due. A worker whose lease expired and was taken over, or a
+// caller that never claimed the row, gets ErrClaimNotHeld and changes nothing:
+// attempt_count, schedule, rejection and financial effects belong to the live
+// claim. A row that already reached a final state is returned as a replay.
+func (s *Service) RetryPending(ctx context.Context, id domain.UUID, owner string) (Result, error) {
+	if owner == "" {
+		return Result{}, pg.ErrInvalidClaim
+	}
 	var out Result
 	err := s.Store.WithTx(ctx, func(tx *pg.Tx) error {
 		peek, err := tx.GetTransaction(ctx, id)
@@ -217,6 +228,16 @@ func (s *Service) RetryPending(ctx context.Context, id domain.UUID) (Result, err
 		if stored.Transaction.Status().IsTerminal() {
 			out = Result{Transaction: stored.Transaction, WalletVersion: stored.ResultWalletVersion, Replay: true}
 			return nil
+		}
+		// Checked only after both locks: a competitor that finished or
+		// rescheduled the row while this call waited has already cleared or
+		// replaced the lease, so the check sees the committed state.
+		held, due, err := tx.ClaimHeld(ctx, id, owner)
+		if err != nil {
+			return err
+		}
+		if !held || !due {
+			return ErrClaimNotHeld
 		}
 		now := s.now()
 		updated, err := s.processLocked(ctx, tx, wallet, *stored, id.String(), now)

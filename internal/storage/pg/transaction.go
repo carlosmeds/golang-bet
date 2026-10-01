@@ -159,6 +159,18 @@ func (tx *Tx) GetTransaction(ctx context.Context, id domain.UUID) (*StoredTransa
 func (tx *Tx) LockTransaction(ctx context.Context, id domain.UUID) (*StoredTransaction, error) {
 	return scanTransaction(tx.QueryRow(ctx, transactionSelect+` WHERE id=$1 FOR UPDATE`, id.String()))
 }
+
+// ClaimHeld reports, on the database clock that ClaimTransactions uses, whether
+// the row is leased to owner with an unexpired lease and whether its
+// next_attempt_at has arrived. Call it after LockTransaction so the answer
+// cannot change before the same transaction writes.
+func (tx *Tx) ClaimHeld(ctx context.Context, id domain.UUID, owner string) (held, due bool, err error) {
+	if owner == "" {
+		return false, false, ErrInvalidClaim
+	}
+	err = tx.QueryRow(ctx, `SELECT COALESCE(lease_owner=$2 AND lease_expires_at>clock_timestamp(),false), COALESCE(next_attempt_at<=clock_timestamp(),false) FROM wager_transactions WHERE id=$1`, id.String(), owner).Scan(&held, &due)
+	return held, due, classify(err)
+}
 func (tx *Tx) FindByIdempotency(ctx context.Context, provider, key string) (*StoredTransaction, error) {
 	return scanTransaction(tx.QueryRow(ctx, transactionSelect+` WHERE provider_id=$1 AND idempotency_key=$2`, provider, key))
 }

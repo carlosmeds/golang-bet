@@ -39,7 +39,7 @@ func (f *fakeClaimer) ClaimTransactions(_ context.Context, owner string, _ int, 
 
 type fakeRetrier func(ctx context.Context, id domain.UUID) (wagering.Result, error)
 
-func (f fakeRetrier) RetryPending(ctx context.Context, id domain.UUID) (wagering.Result, error) {
+func (f fakeRetrier) RetryPending(ctx context.Context, id domain.UUID, _ string) (wagering.Result, error) {
 	return f(ctx, id)
 }
 

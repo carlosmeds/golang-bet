@@ -19,9 +19,10 @@ type Claimer interface {
 }
 
 // Retrier applies one claimed row under the wallet lock; *wagering.Service
-// implements it. It is the only path that writes financial state.
+// implements it. It is the only path that writes financial state, and it
+// refuses (wagering.ErrClaimNotHeld) unless owner holds a live lease on a due row.
 type Retrier interface {
-	RetryPending(ctx context.Context, id domain.UUID) (wagering.Result, error)
+	RetryPending(ctx context.Context, id domain.UUID, owner string) (wagering.Result, error)
 }
 
 // Result classifies what one attempt did to its row.
@@ -34,7 +35,8 @@ const (
 	ResultRejected Result = "REJECTED"
 	// ResultPending: still waiting; another attempt was scheduled with backoff.
 	ResultPending Result = "PENDING"
-	// ResultStale: another worker had already finished the row; no effect here.
+	// ResultStale: another worker already finished or took over the row, or the
+	// lease expired before the attempt; no effect here and no attempt consumed.
 	ResultStale Result = "STALE"
 	// ResultError: a transient or unexpected error; the row keeps its lease
 	// and becomes claimable again when the lease expires.
@@ -170,9 +172,12 @@ func (w *Worker) attempt(parent context.Context, id domain.UUID) Attempt {
 	ctx, cancel := context.WithTimeout(parent, w.cfg.ItemTimeout)
 	defer cancel()
 	started := time.Now()
-	res, err := w.retrier.RetryPending(ctx, id)
+	res, err := w.retrier.RetryPending(ctx, id, w.cfg.Owner)
 	a := Attempt{ID: id, Duration: time.Since(started)}
 	switch {
+	case errors.Is(err, wagering.ErrClaimNotHeld):
+		a.Result = ResultStale
+		w.log.Info("reference claim lost before retry; leaving the row to its current owner", "transactionId", id.String())
 	case err != nil:
 		a.Result, a.Err = ResultError, err
 		if parent.Err() == nil {

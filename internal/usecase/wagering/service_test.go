@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"wagering/internal/contract"
@@ -172,7 +173,17 @@ func TestPendingReferenceAndInboxReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := svc.RetryPending(ctx, pending.Transaction.ID())
+	// A retry needs a live lease on a due row: without a claim it is refused.
+	if _, err = svc.RetryPending(ctx, pending.Transaction.ID(), "worker-a"); !errors.Is(err, wager.ErrClaimNotHeld) {
+		t.Fatalf("unclaimed retry: %v", err)
+	}
+	if _, err = s.Pool.Exec(ctx, `UPDATE wager_transactions SET next_attempt_at=now()-interval '1 second' WHERE id=$1`, pending.Transaction.ID().String()); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, e := s.ClaimTransactions(ctx, "worker-a", 10, time.Minute); e != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %v %v", claimed, e)
+	}
+	result, err := svc.RetryPending(ctx, pending.Transaction.ID(), "worker-a")
 	if err != nil || result.Transaction.Status() != domain.StatusProcessed || result.Transaction.ResultBalance().Minor() != 10000 {
 		t.Fatalf("resolved: %+v %v", result, err)
 	}

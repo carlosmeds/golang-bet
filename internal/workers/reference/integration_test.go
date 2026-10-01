@@ -475,7 +475,13 @@ func TestStaleClaimDoesNotDoubleApply(t *testing.T) {
 	pending := e.exec(svc, operation("refund-s", "bet-s", domain.KindRefund, wallet, 300))
 	e.exec(svc, operation("bet-s", "", domain.KindBet, wallet, 300))
 
-	// Two workers both hold the id (for example a lease expired mid-flight).
+	// The id is delivered to several callers of one claim (for example a retried
+	// hand-off); only the first one under the locks may apply it.
+	e.makeDue("refund-s")
+	owner := "instance-s"
+	if claimed, err := e.store.ClaimTransactions(context.Background(), owner, 10, time.Minute); err != nil || len(claimed) != 1 {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
 	const racers = 6
 	results := make(chan wagering.Result, racers)
 	var wg sync.WaitGroup
@@ -483,7 +489,7 @@ func TestStaleClaimDoesNotDoubleApply(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			res, err := svc.RetryPending(context.Background(), pending.Transaction.ID())
+			res, err := svc.RetryPending(context.Background(), pending.Transaction.ID(), owner)
 			if err != nil {
 				t.Error(err)
 				return
