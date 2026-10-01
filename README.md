@@ -29,7 +29,7 @@ DATABASE_URL='postgres://wagering:wagering_password@localhost:54320/wagering?ssl
 
 ## Authentication and API
 
-Keycloak provisions `provider-a`, `provider-b`, and `internal-service` confidential clients with client credentials. Local test secrets are in `infra/keycloak/realm.json`; use secrets from a real secret store outside local development.
+Keycloak provisions `provider-a`, `provider-b`, and `internal-service` confidential clients with client credentials. Local test secrets are in `infra/keycloak/realm-export.json`; use secrets from a real secret store outside local development.
 
 ```sh
 TOKEN=$(curl -fsS -X POST http://localhost:8082/realms/wagering/protocol/openid-connect/token \
