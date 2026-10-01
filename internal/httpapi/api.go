@@ -26,6 +26,14 @@ import (
 	wallets "wagering/internal/usecase/wallet"
 )
 
+type requestLogKey struct{}
+
+type requestLogIDs struct {
+	walletID              string
+	transactionID         string
+	externalTransactionID string
+}
+
 type API struct {
 	Wallets *wallets.Service
 	Wagers  *wager.Service
@@ -71,7 +79,8 @@ func (a *API) logRequest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		logged := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(logged, r)
+		ids := &requestLogIDs{}
+		next.ServeHTTP(logged, r.WithContext(context.WithValue(r.Context(), requestLogKey{}, ids)))
 		status := logged.status
 		if status == 0 {
 			status = http.StatusOK
@@ -84,6 +93,15 @@ func (a *API) logRequest(next http.Handler) http.Handler {
 			if value := r.PathValue(key); value != "" {
 				attrs = append(attrs, key, value)
 			}
+		}
+		if ids.walletID != "" {
+			attrs = append(attrs, "walletId", ids.walletID)
+		}
+		if ids.transactionID != "" {
+			attrs = append(attrs, "transactionId", ids.transactionID)
+		}
+		if ids.externalTransactionID != "" {
+			attrs = append(attrs, "externalTransactionId", ids.externalTransactionID)
 		}
 		slog.InfoContext(r.Context(), "HTTP request completed", attrs...)
 	})
@@ -242,6 +260,10 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request) {
 		a.Auth.WriteError(w, r, err)
 		return
 	}
+	if ids, ok := r.Context().Value(requestLogKey{}).(*requestLogIDs); ok {
+		ids.walletID = op.WalletID.String()
+		ids.externalTransactionID = op.ExternalTransactionID
+	}
 	key := r.Header.Get("Idempotency-Key")
 	if err = contract.ValidateIdempotencyKey(key); err != nil {
 		badRequest(w, r, err)
@@ -251,6 +273,9 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, r, err)
 		return
+	}
+	if ids, ok := r.Context().Value(requestLogKey{}).(*requestLogIDs); ok {
+		ids.transactionID = result.Transaction.ID().String()
 	}
 	if result.Replay {
 		a.Metrics.Duplicates.Add(1)
