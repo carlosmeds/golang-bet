@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"wagering/migrations"
 )
@@ -72,6 +73,76 @@ func ApplyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("apply %s: %w", name, err)
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO schema_migrations(name,sha256) VALUES($1,$2)`, name, hash); err != nil {
+			_ = tx.Rollback(ctx)
+			return err
+		}
+		if err = tx.Commit(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RevertMigrations applies down files in reverse order. count<=0 reverts every
+// applied version. This is intended for controlled local/test databases; the
+// service itself only applies migrations on startup.
+func RevertMigrations(ctx context.Context, pool *pgxpool.Pool, count int) error {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	const lockID int64 = 0x7761676572696e67
+	if _, err = conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, lockID); err != nil {
+		return err
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = conn.Exec(unlockCtx, `SELECT pg_advisory_unlock($1)`, lockID)
+	}()
+	var names []string
+	query := `SELECT name FROM schema_migrations ORDER BY name DESC`
+	if count > 0 {
+		query += ` LIMIT $1`
+	}
+	var rows pgx.Rows
+	if count > 0 {
+		rows, err = conn.Query(ctx, query, count)
+	} else {
+		rows, err = conn.Query(ctx, query)
+	}
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var name string
+		if err = rows.Scan(&name); err != nil {
+			rows.Close()
+			return err
+		}
+		names = append(names, name)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, name := range names {
+		downName := strings.TrimSuffix(name, ".up.sql") + ".down.sql"
+		sql, err := migrations.FS.ReadFile(downName)
+		if err != nil {
+			return err
+		}
+		tx, err := conn.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, string(sql)); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("revert %s: %w", name, err)
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM schema_migrations WHERE name=$1`, name); err != nil {
 			_ = tx.Rollback(ctx)
 			return err
 		}
