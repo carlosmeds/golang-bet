@@ -273,7 +273,7 @@ tasks:
   model_tier: economy
   reasoning_effort: low
 - id: T19
-  state: pending
+  state: complete
   title: Run final audit and close gaps
   depends_on:
   - T13
@@ -289,7 +289,7 @@ tasks:
   agent: codex
   model_tier: frontier
   reasoning_effort: xhigh
-  actual_model: gpt-6-sol
+  actual_model: Claude Opus 5.5 (high)
 - id: R12
   state: complete
   title: Repair Compose readiness, IdP identities and SQS access
@@ -428,3 +428,153 @@ parallel_sets:
   agent: codex
   model_tier: standard
   reasoning_effort: medium
+- id: R19-F1
+  state: active
+  title: Secure broker publishing and tighten API audience
+  depends_on: []
+  parallel_group: adversarial_repairs
+  owner_area: compose.yaml, infra/localstack/, infra/keycloak/, broker integration tests
+  deliverables: Enforced broker producer boundary and dedicated API audience
+  done_when: Live broker rejects unauthorized publish; authorized app publish and dedicated-audience Keycloak tokens work
+  agent: claude
+  model_tier: standard
+  reasoning_effort: high
+  actual_model: sonnet
+  orca_task_id: task_60120e3b9d10
+- id: R19-F2
+  state: pending
+  title: Preserve valid SQS wagers through database outages
+  depends_on:
+  - R19-F1
+  parallel_group: adversarial_repairs
+  owner_area: internal/messaging/consumer/, readiness wiring and live SQS tests
+  deliverables: Bounded retry/backoff that preserves valid messages during PostgreSQL outages
+  done_when: Valid wager survives a simulated outage beyond the old 7-second window and commits once after recovery; poison still redrives
+  agent: codex
+  model_tier: standard
+  reasoning_effort: high
+  orca_task_id: task_5e1c3eecb14d
+- id: R19-F3
+  state: active
+  title: Improve ordered outbox throughput
+  depends_on: []
+  parallel_group: adversarial_repairs
+  owner_area: internal/storage/pg/outbox.go, internal/workers/outbox/
+  deliverables: Remove avoidable same-aggregate polling delay while preserving order and leases
+  done_when: Real PostgreSQL backlog test drains ordered events without one poll delay per row; two-publisher order and stable IDs remain verified
+  agent: codex
+  model_tier: frontier
+  reasoning_effort: high
+  actual_model: gpt-6-sol
+  orca_task_id: task_2cbcf6bdae49
+- id: R19-F4
+  state: active
+  title: Map transient database errors to HTTP 503
+  depends_on: []
+  parallel_group: adversarial_repairs
+  owner_area: internal/httpapi/ and error classification
+  deliverables: Stable TEMPORARILY_UNAVAILABLE mapping with Retry-After for transient database errors
+  done_when: Transient errors map to 503 while permanent/business errors retain their status
+  agent: codex
+  model_tier: standard
+  reasoning_effort: medium
+  actual_model: gpt-6-sol
+  orca_task_id: task_48413ba4eb84
+- id: R19-F5
+  state: pending
+  title: Complete required operational metrics
+  depends_on:
+  - R19-F3
+  - R19-F4
+  parallel_group: adversarial_repairs
+  owner_area: internal/observability/ and worker outcome instrumentation
+  deliverables: Outcome/source, worker latency, outbox backlog/age and DLQ metrics
+  done_when: Focused tests and live scrape verify all required metric families
+  agent: codex
+  model_tier: standard
+  reasoning_effort: medium
+  orca_task_id: task_31c9bf654ad2
+- id: R19-F6
+  state: pending
+  title: Complete public architecture and operational contracts
+  depends_on:
+  - R19-F1
+  - R19-F2
+  - R19-F3
+  - R19-F4
+  - R19-F5
+  - R19-F7
+  - R19-F8
+  - R19-F10A
+  - R19-F10B
+  - R19-F10C
+  parallel_group: release_documentation
+  owner_area: README.md, ARCHITECTURE.md
+  deliverables: Business/error contracts, money/hash normalization, state machine, reversal/reference/SQS/outbox contracts and limitations
+  done_when: Reproducible docs match final code/config and all file references and commands exist
+  agent: codex
+  model_tier: standard
+  reasoning_effort: medium
+  orca_task_id: task_94b6d40c5564
+- id: R19-F7
+  state: pending
+  title: Add missing independent-wallet and cross-transport races
+  depends_on: []
+  parallel_group: adversarial_repairs
+  owner_area: tests/system/multiprocess_test.go
+  deliverables: HTTP/SQS same-key race, held-lock independent-wallet progress and post-race replay assertions
+  done_when: Real three-process tests prove each property against PostgreSQL and SQS under -race
+  agent: codex
+  model_tier: frontier
+  reasoning_effort: high
+  actual_model: gpt-6-sol
+  orca_task_id: task_b039d9bce492
+- id: R19-F8
+  state: pending
+  title: Apply configured shutdown timeout
+  depends_on: []
+  parallel_group: adversarial_repairs
+  owner_area: cmd/wagering/main.go and lifecycle tests
+  deliverables: Wire SHUTDOWN_TIMEOUT into Fx shutdown behavior
+  done_when: Lifecycle test proves configured bound without changing stop ordering
+  agent: codex
+  model_tier: standard
+  reasoning_effort: low
+  orca_task_id: task_2755e6abd457
+- id: R19-F10A
+  state: pending
+  title: Persist inbox identity on concurrent idempotency replay
+  depends_on: []
+  parallel_group: adversarial_repairs
+  owner_area: internal/usecase/wagering/ and PostgreSQL tests
+  deliverables: Concurrent SQS replay writes completed inbox row atomically
+  done_when: HTTP/SQS same-key race produces one movement and durable inbox identity
+  agent: codex
+  model_tier: standard
+  reasoning_effort: high
+  orca_task_id: task_57b42ce79c79
+- id: R19-F10B
+  state: pending
+  title: Honor reference retry leases and schedules
+  depends_on: []
+  parallel_group: adversarial_repairs
+  owner_area: internal/usecase/wagering/ and reference worker PostgreSQL tests
+  deliverables: Retry requires a current claim and due next_attempt_at
+  done_when: Stale/early attempts cannot consume retry budget; due lease resolves once
+  agent: claude
+  model_tier: standard
+  reasoning_effort: high
+  orca_task_id: task_23a4dd64498e
+- id: R19-F10C
+  state: pending
+  title: Add missing request identifiers to logs and tidy modules
+  depends_on:
+  - R19-F4
+  parallel_group: adversarial_repairs
+  owner_area: internal/httpapi/ logging tests, go.mod, go.sum
+  deliverables: Safe request IDs in logs and clean go mod tidy -diff
+  done_when: Tests assert IDs are logged without secrets/payload; tidy diff is clean
+  agent: codex
+  model_tier: economy
+  reasoning_effort: low
+  orca_task_id: task_6d588aca5f6a

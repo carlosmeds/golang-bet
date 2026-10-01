@@ -12,9 +12,9 @@ implement_code_now: true
 push_remote_now: false
 ```
 
-The original linked worktree remains on `carlosmeds/lead` at `3f469e0` with all prior uncommitted files preserved. The recovery commits have been fetched into the local Git common repository and integrated on the separate local branch `carlosmeds/lead-integration`; its current code/test commits are `4e78f23`, `44f2021`, `db3e9e7`, and `d0eb026`, after the recovery history. The `carlosmeds/lead-recovery` branch preserves the first transfer point. The original worktree was not reset or overwritten. No push or main merge occurred.
+The original linked worktree remains on `carlosmeds/lead` at `3f469e0` with all prior uncommitted files preserved. Recovery commits and the independent T19 review commit are integrated on the separate local branch `carlosmeds/lead-integration`; no push or main merge occurred.
 
-Orca Run `run_21967f35dd24` is active and the runtime is ready. T11 and T16 completion reports were inspected and acknowledged. T17 and repair R18 are completed in the DAG; the only remaining gate is T19 independent adversarial review and any repairs it generates. Claude OAuth is expired in Orca; Codex authentication is active and the configured model is `gpt-6-sol`. T19 is allocated to a separate Codex session at xhigh reasoning.
+Orca Run `run_21967f35dd24` is active and the runtime is ready. T11, T16, T17 and R18 completion reports were inspected. T19 completed as an independent Claude Opus review at high effort in a separate worktree. The report found 2 high, 5 medium and several low findings; repair tasks are now active. No remote push or main merge occurred.
 
 `SPEC.md` is local, ignored and unchanged. SHA-256 in the source checkout and reviewer checkout: `6298060871dd199a6ca5de2d6b7f007c4dccc887cc1c9ae1eb81982a4ca79135`.
 
@@ -26,7 +26,9 @@ Orca Run `run_21967f35dd24` is active and the runtime is ready. T11 and T16 comp
 - T15 PostgreSQL, reference, outbox, Keycloak/HTTP and SQS multi-process integration suites passed against Compose under `-race`.
 - T16 IdP/HTTP authorization tests now compose the current metrics and SQS modules through repair R18 (`d0eb026`).
 - T17 starts three independent service processes, creates isolated FIFO queues, exercises replay/race/restart/crash/recovery and reconciles the ledger. It passed independently four times and in the sequential live integration batch.
-- T19 has not run. It must receive the immutable `SPEC.md`, `REQUIREMENTS.md`, `DECISIONS.md` and final code, with no previous review conclusions. Valid findings must become repair tasks.
+- T19 read the immutable `SPEC.md`, full `.agent/REQUIREMENTS.md`, full `.agent/DECISIONS.md` and final integrated code without previous review conclusions. Its per-requirement matrix and findings are in `.agent/handoffs/T19.md`.
+- T19's redrive tests, README correction and ARCHITECTURE correction are integrated in commit `0c770a2`; `WAGERING_TEST_SQS_ENDPOINT=http://localhost:4566 go test -race -count=1 -v ./tests/integration/sqs` passed.
+- Repair tasks R19-F1 (broker security/API audience), R19-F3 (outbox throughput) and R19-F4 (transient HTTP errors) are dispatched. R19-F2 depends on R19-F1; metrics, concurrency coverage, shutdown timeout, inbox replay, reference retry and request-log/module tidy repairs are tracked in Orca. R19-F6 documentation follows the behavior repairs.
 
 ## Verification
 
@@ -41,10 +43,9 @@ Orca Run `run_21967f35dd24` is active and the runtime is ready. T11 and T16 comp
 
 ## Remaining work
 
-1. Commit the current verification and model-allocation documentation changes.
-2. Create a separate Orca-managed T19 review worktree from `carlosmeds/lead-integration`; copy `SPEC.md` locally and confirm its hash before dispatch.
-3. Review every mandatory requirement and actively search for monetary, transaction, concurrency, auth, idempotency, replay, inbox/outbox, pending-reference, recovery and shutdown failures.
-4. Create and verify repair tasks for every valid finding, then rerun formatting, vet, all tests, live integrations, Compose and multi-process recovery.
-5. Commit the final local integration branch cleanly. Do not push or merge into main.
+1. Integrate and verify all valid T19 repairs, including the missing system concurrency cases.
+2. Complete the documentation and requirements evidence updates after the implementation changes settle.
+3. Rerun gofmt, both vet configurations, unit/race tests, the live Compose integration suites, T17 multi-process recovery and Compose startup/readiness.
+4. Commit the final local integration branch cleanly. Do not push or merge into main.
 
 The project remains active until T19 has no unresolved critical/high findings and all post-review verification passes.
