@@ -1,85 +1,85 @@
 # Wagering System
 
-A robust, idempotent, and highly available multi-tenant wagering ledger system.
+A multi-provider wagering ledger with durable idempotency across HTTP and SQS. Financial amounts use integer minor units in PostgreSQL and decimal strings at the API boundary. PostgreSQL is the authority for balances, ledger entries, inbox receipts, retries, and pending outbox events.
 
-## Setup & Bootstrap
+## Local bootstrap
 
-This project requires Go 1.23.0 and Docker.
+Requirements: Go 1.23.0 and Docker Compose v2.
 
-1. **Environment setup**: Copy the example environment variables.
-   ```sh
-   cp .env.example .env
-   ```
+```sh
+docker compose up -d --build --wait
+```
 
-2. **Infrastructure**: Start PostgreSQL, LocalStack (SQS), and Keycloak locally.
-   ```sh
-   docker compose up -d --wait
-   ```
+Compose provisions PostgreSQL, Keycloak, MiniStack SQS queues/policies, and starts the application. The service applies versioned SQL migrations at startup. Compose supplies its own container URLs; `.env.example` documents host-side local values and is not needed to start the Compose stack.
 
-## Queues (SQS)
-*(Provisional: SQS worker consumers and producers are pending implementation in upcoming tasks)*
+The default local endpoints are API `http://localhost:8081`, Keycloak `http://localhost:8082`, PostgreSQL `localhost:54320`, and MiniStack `http://localhost:4566`.
 
-The system relies on AWS SQS FIFO queues. When using Docker Compose, LocalStack automatically provisions these queues via `infra/localstack/init-sqs.sh`:
-- `wager-transactions.fifo`: Inbound queue for asynchronous transaction processing.
-- `wager-transactions-dlq.fifo`: Dead Letter Queue for poison-pill transactions that exhaust retry limits.
-- `wager-events.fifo`: Outbound queue for system events (wallet balance changes, processed transactions).
+Operational endpoints are `GET /health/live`, `GET /health/ready` (PostgreSQL and inbound SQS checks), and `GET /metrics` (Prometheus text format).
 
 ## Migrations
-*(Provisional: The dedicated migration command/runner is pending implementation)*
 
-Database migrations are defined in the `migrations/` directory using plain SQL and the `golang-migrate` naming convention. Once the runner is implemented, they can be applied. Alternatively, you can run them manually using the `golang-migrate` CLI:
+The application applies pending migrations during startup. To manage them manually, set a host-reachable database URL:
 
-**Up (Apply):**
 ```sh
-migrate -path migrations -database "postgres://wagering:wagering_password@localhost:54320/wagering?sslmode=disable" up
+DATABASE_URL='postgres://wagering:wagering_password@localhost:54320/wagering?sslmode=disable' go run ./cmd/migrate -direction up
+DATABASE_URL='postgres://wagering:wagering_password@localhost:54320/wagering?sslmode=disable' go run ./cmd/migrate -direction down -count 1
 ```
 
-**Down (Rollback):**
+`-count 0` rolls back all applied migrations. Migrations are plain, versioned SQL under `migrations/`; each has an up and down direction.
+
+## Authentication and API
+
+Keycloak provisions `provider-a`, `provider-b`, and `internal-service` confidential clients with client credentials. Local test secrets are in `infra/keycloak/realm.json`; use secrets from a real secret store outside local development.
+
 ```sh
-migrate -path migrations -database "postgres://wagering:wagering_password@localhost:54320/wagering?sslmode=disable" down
+TOKEN=$(curl -fsS -X POST http://localhost:8082/realms/wagering/protocol/openid-connect/token \
+  -d 'client_id=provider-a' -d 'client_secret=provider-a-secret' \
+  -d 'grant_type=client_credentials' | jq -r .access_token)
+INTERNAL_TOKEN=$(curl -fsS -X POST http://localhost:8082/realms/wagering/protocol/openid-connect/token \
+  -d 'client_id=internal-service' -d 'client_secret=internal-secret' \
+  -d 'grant_type=client_credentials' | jq -r .access_token)
 ```
 
-## Authentication
-*(Provisional: The HTTP API and route protection are pending implementation in upcoming tasks)*
+Use the internal-service token for wallet creation and wallet/ledger/reconciliation routes. Provider tokens can submit wagering operations and read only their own transactions. Routes are `POST /wallets`, `GET /wallets/{walletId}`, `GET /wallets/{walletId}/ledger`, `POST /wallets/{walletId}/reconciliation`, `POST /wagering/transactions`, `GET /wagering/transactions/{transactionId}`, and `GET /providers/{providerId}/wagering/transactions/{externalTransactionId}`. Wager submission requires `Idempotency-Key`; money is JSON `{ "amount": "12.34", "currency": "BRL" }`.
 
-Business endpoints require external OIDC authentication. The local Keycloak container automatically provisions a `wagering` realm and a `wagering-client` to support client credentials flow.
+Example wallet opening:
 
-Example of obtaining a token and calling the service:
 ```sh
-# Fetch a JWT from Keycloak
-TOKEN=$(curl -sX POST http://localhost:8082/realms/wagering/protocol/openid-connect/token \
-  -d "client_id=wagering-client" \
-  -d "grant_type=client_credentials" \
-  | jq -r .access_token)
-
-# Use the token for API requests (once endpoints are implemented)
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8081/v1/wallets/...
+curl -fsS -X POST http://localhost:8081/wallets \
+  -H "Authorization: Bearer $INTERNAL_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"playerId":"player-123","initialBalance":{"amount":"100.00","currency":"BRL"}}'
 ```
 
-## Testing
+## Queue behavior
 
-The test suite covers unit, integration, concurrency, and fault tolerance scenarios.
+MiniStack provisions `wager-transactions.fifo`, `wager-transactions-dlq.fifo`, and `wager-events.fifo`. The consumer records SQS `messageId` in its PostgreSQL inbox in the same transaction as financial effects. It deletes a receipt only after commit; invalid messages are left for queue redrive, and transient failures use bounded visibility backoff. On shutdown, unstarted batch receipts are made visible again. The default inbound visibility is 60 seconds; long-poll is 10 seconds and requests contain at most 10 messages.
 
-**Unit & Linter Tests:**
+FIFO grouping and deduplication use the wallet aggregate identifier and stable event ID respectively. Outbound events are read from the transactional outbox and sent to `wager-events.fifo`; consumers should deduplicate by `eventId` because a crash after broker acceptance but before recording publication can cause the same event to be delivered again. Reference retries and outbox publication use database leases, bounded retries, and recover after process restart.
+
+## Verification
+
 ```sh
 go test ./...
-go vet ./...
 go test -race ./...
+go vet ./...
 ```
 
-**Integration Tests:**
-*(Provisional: Full integration test suites, multi-process tests, and fault tests are pending)*
-Require local infrastructure running (`docker compose up -d`). Pass the administrative database URL to run integration suites:
+The default suite includes unit tests and skips live-dependency tests when their environment variables are unset. With Compose running, run database/outbox integration tests using an administrative URL that can create scratch databases:
+
 ```sh
-WAGERING_TEST_ADMIN_URL="postgres://wagering:wagering_password@localhost:54320/wagering?sslmode=disable" go test ./... -v -count=1
+WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' go test ./internal/storage/pg ./internal/workers/reference ./internal/workers/outbox -count=1
+WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' WAGERING_TEST_KEYCLOAK_URL='http://localhost:8082' go test ./tests/... -count=1
 ```
 
-**Multi-Instance & Fault Tests:**
-Tests simulating multi-process concurrent updates and fault-injection (crash and recovery, outbox lag, duplicate deliveries):
+For repeatable multi-instance and crash-window verification, see [ARCHITECTURE.md](ARCHITECTURE.md) for implemented guarantees and current test coverage. The `tests/integration` packages use real Keycloak and PostgreSQL; messaging tests use the real AWS SQS-compatible endpoint supplied through the local stack.
+
+The independent-process recovery suite launches three `cmd/wagering` OS processes and a second binary compiled with test-only crash hooks:
+
 ```sh
-# Multi-instance race tests:
-WAGERING_TEST_ADMIN_URL="postgres://wagering:wagering_password@localhost:54320/wagering?sslmode=disable" go test -run TestMultiProcess ./...
-
-# Fault-injection tests:
-WAGERING_TEST_ADMIN_URL="postgres://wagering:wagering_password@localhost:54320/wagering?sslmode=disable" go test -run TestFaultInjection ./...
+WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' \
+WAGERING_TEST_KEYCLOAK_URL='http://localhost:8082' \
+WAGERING_TEST_SQS_ENDPOINT='http://localhost:4566' \
+go test -race -count=1 ./tests/system
 ```
+
+It creates isolated FIFO queues for each run, then exercises 50 duplicate requests, the 80/80 race, independent wallets, HTTP/SQS replay, process restart, commit-before-delete redelivery, pending-reference recovery, outbox lease recovery in a second process, and ledger reconciliation. `systemfault` hooks are excluded from normal builds and used only for this test binary.

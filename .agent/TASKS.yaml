@@ -9,6 +9,7 @@ execution_policy:
   parallelism_rule: Run tasks together only when dependencies are done and file ownership is separate.
 tasks:
 - id: T01
+  state: complete
   title: Bootstrap Go, configuration and Fx lifecycle
   depends_on: []
   parallel_group: foundation
@@ -19,6 +20,7 @@ tasks:
   model_tier: standard
   reasoning_effort: medium
 - id: T02
+  state: complete
   title: Design and migrate PostgreSQL schema
   depends_on: []
   parallel_group: foundation
@@ -32,6 +34,7 @@ tasks:
   reasoning_effort: high
   actual_model: Sonnet 5.5
 - id: T03
+  state: complete
   title: Implement domain model and typed events
   depends_on: []
   parallel_group: foundation
@@ -44,6 +47,7 @@ tasks:
   reasoning_effort: high
   actual_model: Sonnet 5.5
 - id: T04
+  state: complete
   title: Define transport contracts and canonical idempotency hash
   depends_on:
   - T03
@@ -56,6 +60,7 @@ tasks:
   model_tier: standard
   reasoning_effort: medium
 - id: T05
+  state: complete
   title: Implement OIDC authentication and provider authorization
   depends_on:
   - T01
@@ -69,6 +74,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T06
+  state: complete
   title: Implement transactional PostgreSQL repositories
   depends_on:
   - T02
@@ -84,6 +90,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T07
+  state: complete
   title: Implement shared financial use case
   depends_on:
   - T03
@@ -99,6 +106,7 @@ tasks:
   model_tier: frontier
   reasoning_effort: xhigh
 - id: T08
+  state: complete
   title: Implement HTTP API and consistent reconciliation
   depends_on:
   - T01
@@ -113,6 +121,7 @@ tasks:
   model_tier: standard
   reasoning_effort: medium
 - id: T09
+  state: complete
   title: Implement SQS consumer and inbox processing
   depends_on:
   - T01
@@ -128,6 +137,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T10
+  state: complete
   title: Implement durable reference retry worker
   depends_on:
   - T01
@@ -142,6 +152,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T11
+  state: recovery_committed
   title: Implement transactional outbox publisher
   depends_on:
   - T01
@@ -155,6 +166,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T12
+  state: complete
   title: Provision local infrastructure and test identities
   depends_on:
   - T01
@@ -166,6 +178,7 @@ tasks:
   model_tier: economy
   reasoning_effort: medium
 - id: T13
+  state: recovery_committed_live_unverified
   title: Add logs, metrics and health checks
   depends_on:
   - T01
@@ -181,6 +194,7 @@ tasks:
   model_tier: economy
   reasoning_effort: medium
 - id: T14
+  state: complete
   title: Write focused domain and contract unit tests
   depends_on:
   - T03
@@ -194,6 +208,7 @@ tasks:
   model_tier: economy
   reasoning_effort: medium
 - id: T15
+  state: partial
   title: Write real DB/SQS integration tests
   depends_on:
   - T07
@@ -209,6 +224,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T16
+  state: recovery_committed
   title: Write real IdP and HTTP authorization integration tests
   depends_on:
   - T05
@@ -223,6 +239,7 @@ tasks:
   model_tier: standard
   reasoning_effort: high
 - id: T17
+  state: complete
   title: Verify multi-process concurrency and crash recovery
   depends_on:
   - T08
@@ -241,6 +258,7 @@ tasks:
   model_tier: frontier
   reasoning_effort: xhigh
 - id: T18
+  state: complete
   title: Write reproducible user and architecture documentation
   depends_on:
   - T04
@@ -255,6 +273,7 @@ tasks:
   model_tier: economy
   reasoning_effort: low
 - id: T19
+  state: blocked_external
   title: Run final audit and close gaps
   depends_on:
   - T13
@@ -271,6 +290,7 @@ tasks:
   model_tier: frontier
   reasoning_effort: high
 - id: R12
+  state: complete
   title: Repair Compose readiness, IdP identities and SQS access
   depends_on:
   - T12
@@ -334,6 +354,7 @@ parallel_sets:
   - T15
   - T16
 - id: R13
+  state: complete
   title: Repair real Keycloak claims and broker policy
   depends_on:
   - R12
@@ -346,6 +367,7 @@ parallel_sets:
   model_tier: economy
   reasoning_effort: medium
 - id: R14
+  state: complete
   title: Preserve monotonic SQL updated_at timestamps
   depends_on:
   - T02
@@ -357,6 +379,7 @@ parallel_sets:
   model_tier: standard
   reasoning_effort: medium
 - id: R15
+  state: complete
   title: Release all SQS batch receipts on shutdown
   depends_on:
   - T09
@@ -367,7 +390,20 @@ parallel_sets:
   agent: codex
   model_tier: standard
   reasoning_effort: medium
+- id: R17
+  state: recovery_committed
+  title: Complete request correlation and SQS replay observability
+  depends_on:
+  - T13
+  parallel_group: repair
+  owner_area: internal/auth/, internal/httpapi/, internal/messaging/consumer/, internal/workers/outbox/, internal/observability/
+  deliverables: Structured request/message logs with safe identifiers; duplicate and conflict metric coverage for SQS replays
+  done_when: Logs include available correlation/message/transaction/wallet/provider IDs without financial payloads; metrics tests cover SQS duplicates/conflicts
+  agent: codex
+  model_tier: standard
+  reasoning_effort: medium
 - id: R16
+  state: complete
   title: Preserve outbox order across publishers
   depends_on:
   - T06

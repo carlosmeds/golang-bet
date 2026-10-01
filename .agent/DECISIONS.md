@@ -1,4 +1,4 @@
-# Decisões propostas
+# Decisões registradas
 
 Estas decisões são propostas de implementação para revisão; `SPEC.md` prevalece em caso de divergência. Detalhes definitivos, limitações e trade-offs entram em `ARCHITECTURE.md` durante a execução.
 
@@ -56,3 +56,27 @@ SQS ReceiveMessage can return up to ten messages already hidden by a visibility 
 
 ### D31 — Gate outbox claims by earlier unpublished aggregate events
 FIFO order across multiple publishers requires a database claim predicate: a wallet event is ineligible while any earlier event for that aggregate remains unpublished, even if another process has leased it. The claim query now enforces this; a real PostgreSQL test with two owners verifies no overtaking.
+
+### D32 — Expose health and metrics on the application listener
+Liveness is process-local; readiness performs bounded PostgreSQL ping and inbound SQS queue-attribute checks. `/metrics` exposes a dependency-free Prometheus text endpoint with bounded status labels and counters; HTTP request logs carry route, status, correlation and available provider/resource IDs; auth rejection logs include correlation ID; SQS logs carry message/correlation/transaction/wallet/provider IDs; outbox logs carry event/aggregate/correlation IDs. Reconciliation divergence is logged and metered. Logs exclude credentials and full financial payloads. Focused metrics tests pass; live readiness remains to be exercised in a network-enabled environment.
+
+### D33 — Keep migration runner dependency-free
+The embedded versioned SQL migration set is applied at startup and exposed through `cmd/migrate -direction up|down`, with a count for rollback. This avoids a second migration engine and keeps rollback behavior adjacent to the SQL assets. Compile and package tests pass; real up/down cycle needs the integration environment.
+
+### D34 — Record bounded verification honestly under sandbox restrictions
+Current execution cannot open sockets and the linked worktree Git common directory is read-only. Full and live integration verification and supervised dispatch are unavailable. The local recovery Git copy permits commits, but its refs are not yet reflected in the original shared repository. Keep T17 live execution and T19 open until runtime and filesystem capability return.
+
+### D35 — Preserve original Orca gitdir while enabling local commits
+The linked worktree's root `.git` file and shared common Git directory are read-only. Do not replace the pointer or mutate the shared repository. Create a no-hardlink local clone of Git metadata at `.agent/gitmeta`, select the original `carlosmeds/lead` commit, and operate against it through explicit `GIT_DIR` and `GIT_WORK_TREE`; save the original `.git` pointer in `.agent/ORIGINAL_GITDIR.txt`. This preserves every working file and original shared reference while allowing local commits and a future bundle/transfer. No push or main merge is permitted.
+
+### D36 — Test crash windows through build-tag-only failpoints
+`systemfault`-tagged builds pause only in two deterministic points: after a committed inbox operation but before SQS deletion, and after an outbox lease has committed but before send. Default builds use no-op hooks. This permits T17 to kill actual independent OS processes at the precise recovery boundaries without exposing environment-controlled pause behavior in production binaries. Both build variants must compile, and only a real infrastructure run can accept the scenarios.
+
+### D37 — Count SQS financial replays separately from message deduplication
+Inbox rows prevent duplicate transport work while the shared idempotency key prevents duplicate financial effects. A redelivered message that returns the persisted result increments the duplicate metric; a conflicting inbox/business identity increments the conflict metric. Logs include stable message/correlation and business identity IDs but never the operation amount or full body.
+
+### D38 — Preserve and transfer recovery commits after Git access returns
+The original linked worktree was read-only during the recovery run, so commits were created in a no-hardlink Git metadata clone. Once the environment restored Git writes, transfer those commits through a new local branch/worktree, preserving the original worktree's existing uncommitted files. Do not push or merge to main.
+
+### D39 — Isolate multiprocess system tests with per-run queues
+The Compose application also consumes the project's default inbound queue. Sharing that queue with T17 allows the normal Compose process, which uses a different database, to steal test messages. Each T17 run now creates unique real FIFO input and output queues and removes them at cleanup. Test subscenarios also ensure their required app-process count so a failed earlier scenario cannot cascade into a panic in later scenarios.

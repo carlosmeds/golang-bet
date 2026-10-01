@@ -90,3 +90,15 @@
 | REQ-084 | README documents clean bootstrap, env, queues, migrations up/down, auth examples and all test/integration/multi-instance/fault commands. | T18,T19 | Clean-checkout documentation audit. |
 | REQ-085 | `.env.example` has local examples and no real secrets; IdP auto-provisions identities. | T12,T18 | Compose/auth setup check. |
 | REQ-086 | ARCHITECTURE documents money, transactions, idempotency, locks, pending references, reversals, inbox/outbox, auth, Fx, shutdown, interpretations and limitations. | T18,T19 | Documentation audit. |
+
+## Current evidence snapshot
+
+This is an implementation checkpoint, not a completion claim. The verification target column above remains authoritative for final acceptance.
+
+- REQ-058: `/health/live` and `/health/ready` handlers now exist; readiness pings PostgreSQL and checks inbound SQS attributes. Live checks still need Compose verification.
+- REQ-057, REQ-075, REQ-076: reconciliation divergence logs wallet/correlation IDs without monetary payload; HTTP/auth/SQS/outbox structured logs carry available correlation/message/transaction/wallet/provider/event identifiers. Metrics cover HTTP status, idempotent duplicates across HTTP and SQS, consumer/reference/outbox retry counts, DLQ redrive candidates, conflicts, outbox publication lag, HTTP processing time and reconciliation divergence. Focused metrics tests pass. DLQ metrics count poison-message redrive candidates because the consumer has no privileged DLQ receive path.
+- REQ-006: embedded up/down migration runner and `cmd/migrate` exist; package compiles. Real reversal cycle still needs PostgreSQL verification in this sandbox.
+- REQ-068/069/070: outbox claim/order/retry/publish implementation and PostgreSQL tests are present; prior worker handoff reports live DB checks. SQS delivery/crash integration remains unverified here.
+- REQ-052/059/060/061: auth and HTTP integration suites exist; T16 handoff reports live Keycloak tests passed, and the current Compose stack is available for final rerun.
+- REQ-065/067/068/069/080/081/082: live T17 passed under `-race` with three independent processes, isolated live SQS FIFO queues, HTTP/SQS idempotency crossing, inbox commit-before-delete crash and redelivery, pending-reference restart and resolution, outbox lease recovery, and ledger-derived balance reconciliation.
+- REQ-080/081/082 and REQ-083 full/race gates: still open. The current sandbox denies local sockets, preventing full auth unit tests and live multi-process execution.

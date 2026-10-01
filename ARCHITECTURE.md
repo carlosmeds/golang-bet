@@ -1,47 +1,49 @@
 # Architecture
 
-The Wagering module is designed as a distributed, idempotent, event-driven ledger. It guarantees consistency for financial operations across multiple transports (HTTP and SQS) and concurrent instances.
+The service is a Go 1.23 application assembled with Uber Fx. `cmd/wagering` composes configuration, PostgreSQL, OIDC, SQS, HTTP, reference retry, and outbox modules. PostgreSQL is the durable authority; SQS is an at-least-once transport. The `domain` package is independent of Fx, HTTP, SQS, and storage adapters.
 
-## Application Architecture (Fx & Shutdown)
+## Lifecycle and dependencies
 
-The application relies on `go.uber.org/fx` for dependency injection and lifecycle management. Modules encapsulate specific domain boundaries (e.g., Auth, Storage, HTTP). `bootstrap.New()` wires these components and ensures clean shutdown. During SIGTERM, Fx gracefully stops HTTP listeners, aborts SQL connections, and safely releases in-flight SQS message visibility timeouts so they can be immediately retried.
+Fx constructs and starts dependencies before listeners and workers. Shutdown runs hooks in reverse order: HTTP stops accepting requests, workers stop claiming new work and finish or cancel bounded in-flight operations, and PostgreSQL closes last. Database operations accept request/worker contexts. `cmd/migrate` provides explicit `up` and `down` commands; the app also applies pending migrations on startup.
 
-## Money & Arithmetic
+## Money, wallet and ledger
 
-Money is handled using decimal strings to avoid floating-point inaccuracies and guarantee deterministic hashing. Any financial transaction checks for proper constraints such as preventing zero-amount operations except where permitted (e.g., LOSS transactions).
+Money stores signed integer minor units and an ISO 4217 currency. External JSON uses a decimal string with exactly two fractional digits; parsing rejects exponent notation, excess scale, negative external values, and overflow. There is no floating-point monetary arithmetic. Wallet balances are nonnegative and each wallet has a monotonically increasing version.
 
-## Transactions & Locks
+The schema enforces one wallet per `(player_id,currency)`, a nonnegative balance, unique transaction identities, valid ledger equations, and append-only ledger rows. Wallet-changing work runs in an explicit PostgreSQL `READ COMMITTED` transaction and locks the wallet row with `SELECT ... FOR UPDATE`. A balance change, transaction state, ledger entry, inbox completion when present, and outbox events commit atomically. Different wallets use different row locks. Read endpoints and reconciliation use PostgreSQL `REPEATABLE READ` snapshots.
 
-Transactions are processed in PostgreSQL using strict serializability within a wallet boundary. 
-- **Row Locks**: Before mutating balance, the system acquires a per-wallet row lock (`SELECT ... FOR UPDATE`) inside a `READ COMMITTED` transaction callback.
-- **Atomic Operations**: `UpdateWallet`, `InsertTransaction`, `InsertLedger`, and `InsertOutbox` execute within the same database transaction.
-- **Reconciliation**: Ledgers provide consistent paginated read-snapshots without blocking active transactions.
+## Operations and idempotency
 
-## Idempotency & Reversals
+The shared wagering use case serves HTTP and SQS. A deterministic canonical JSON hash covers business fields and normalized amounts, while excluding idempotency key and transport metadata. Reuse of the same key and same content returns the persisted result; different content conflicts. HTTP requires an explicit `Idempotency-Key`. Provider/external transaction ID is separately unique so a second key cannot apply the same external transaction.
 
-The system provides robust idempotency that works across both HTTP (`Idempotency-Key`) and asynchronous SQS payloads:
-- A deterministic canonical JSON hash of business fields ensures identical payloads are safely replayed.
-- Repeating an identical payload yields the persisted result. Different payloads with the same key are rejected with conflict errors.
-- **Pending References**: When a referenced transaction (e.g., for a reversal) is missing, it creates a `PENDING_REFERENCE` with exponential backoff and a maximum TTL.
-- **Reversals**: Reversals lookup previous transactions using external IDs tied strictly to their `providerId`. A transaction cannot be refunded twice.
+BET debits, WIN credits, LOSS records success without a ledger balance mutation, REFUND reverses exactly one processed BET, and ROLLBACK reverses one processed BET/WIN/REFUND. Reference resolution scopes by provider and validates player, wallet, currency and round. Unique constraints prevent double reversal across competing requests. A reversal debit that cannot be funded is durably rejected with its own failure code. Opening creates a stable internal OPENING transaction, credit ledger and events atomically for positive initial balances; zero opening creates no financial records.
 
-## Inbox & Outbox Pattern
-*(Provisional: SQS worker producers and consumers are pending implementation)*
+Pending transactions and `PENDING_REFERENCE` rows are durable. The reference worker claims due rows with leases, bounded exponential backoff and expiry/max attempts. A process crash leaves a lease that another instance can take after expiry. Rejections and terminal outcomes have stable failure codes.
 
-The module avoids distributed transactions (2PC) by using the Transactional Outbox pattern:
-- **Inbox**: SQS messages use `messageId` for deduplication. Inbox rows persist processing intent; messages are only deleted from the queue after durable commit. If processing fails transiently, messages are retried; if permanently failed, they move to the DLQ. SQS FIFO guarantees order and grouping.
-- **Outbox**: Events (e.g., `WalletBalanceChanged`) are staged in the `outbox` table during the business transaction. An asynchronous background publisher claims batches using `SELECT ... SKIP LOCKED` to publish them to the outbound SQS events queue. This ensures zero data loss if the system crashes immediately after database commit but before message dispatch.
+## Inbox, outbox and SQS
 
-## Authentication (OIDC)
-*(Provisional: The HTTP API and endpoint wiring are pending implementation)*
+The inbound `wager-transactions.fifo` consumer uses the SQS `messageId` as inbox identity and stores a payload hash. Inbox completion and financial writes share one SQL transaction. A message is deleted only after durable commit. A matching duplicate is harmless; a conflicting body for the same message ID is detected. Business rejections are durable results; transient failures are retried with bounded visibility backoff; malformed/permanent messages reach the configured DLQ through SQS redrive. The default long poll is 10 seconds, batch size is at most 10, and visibility timeout is 60 seconds. Shutdown releases unstarted receipts and lets in-flight work finish within the application shutdown deadline.
 
-Business HTTP endpoints mandate external Identity Provider (IdP) authentication using OIDC. 
-- Standard JWTs (`RS256` or `ES256`) are verified via an Fx-wired middleware (`*auth.Middleware`).
-- The middleware rigorously validates `iss`, `aud`, expiration, and standard scope claims (`wagering:provider` or `wagering:internal`). 
-- Isolation: Provider tokens must include a `provider_id` claim, restricting their operations and lookups to their data only.
+Events are immutable snapshots in the transactional outbox. Publishers claim rows using database leases and `SKIP LOCKED`; multiple instances can publish concurrently. Events for an aggregate retain sequence order. Each SQS FIFO event uses aggregate ID as `MessageGroupId` and stable `eventId` as `MessageDeduplicationId`. If publish succeeds but the database acknowledgment is lost, the same event ID can be published again; downstream consumers must deduplicate. Lease expiry recovers abandoned work and retry delay is bounded.
 
-## Limitations & Considerations
+Typed event envelopes carry event ID/type, aggregate, correlation and optional causation IDs, occurrence time, version, and typed data. Timestamps are UTC RFC3339 and money is serialized as decimal strings. Events cover processed operations (including LOSS), rejections, balance changes, and pending-reference transitions.
 
-- **Database Sharding**: The current schema uses row-level locking on a single PostgreSQL instance and is not internally sharded. 
-- **LocalStack IAM**: AWS IAM is not strictly enforced in local development (`ENFORCE_IAM=1` is disabled in the Compose setup), prioritizing fast queue provisioning.
-- **JWT Introspection**: Revoked tokens remain technically valid until their `exp` time because validation relies purely on signature and standard claims rather than synchronous introspection or a revocation list.
+## HTTP and OIDC
+
+HTTP exposes wallet creation/read/ledger/reconciliation and wagering submit/read routes. Provider tokens are validated against configured OIDC issuer, audience, signature and expiration; `provider_id` scopes submissions and reads. Internal-service scope protects wallet operations. Cross-provider lookups return not found to avoid revealing another provider's records. There is no local password or token issuer.
+
+Reconciliation reads wallet and ledger from one repeatable-read snapshot, calculates opening plus ledger effects and reports stored balance, calculated balance, difference, consistency and entry count. It does not mutate financial state.
+
+## Local dependencies and tests
+
+Docker Compose provisions PostgreSQL, Keycloak identities, and SQS-compatible inbound/outbound FIFO queues with a redrive DLQ. Local Keycloak client secrets and endpoint examples are development-only. See [README.md](README.md) for bootstrap, tokens, migrations and commands.
+
+Unit tests cover domain transitions and amount/hash boundaries. PostgreSQL-backed integration tests cover schema and constraints, transaction operations, retries and outbox claims. `tests/integration/auth` and `tests/integration/http` run real Keycloak token flows and verify access control using a PostgreSQL scratch database. `tests/system` builds and launches three independent application processes against real PostgreSQL, Keycloak and SQS, then tests the duplicate/race cases, cross-transport redelivery after commit-before-delete, process restart, pending-reference resumption, competing outbox recovery and ledger reconciliation. Its crash hooks require a separate `-tags=systemfault` build and are absent from normal production binaries. The full system suite is implemented but still needs execution in an environment with Docker and network access; see `.agent/STATUS.md`.
+
+## Decisions and limitations
+
+- Database row-level locking and uniqueness constraints are the serialization boundary; the service does not use a process-global financial lock.
+- PostgreSQL remains a single primary database; horizontal service instances are supported, database sharding is not part of this implementation.
+- SQS and the local SQS-compatible implementation are at-least-once. Stable IDs plus durable inbox/outbox records make repeats safe; they do not create a distributed exactly-once transaction.
+- Keycloak/local stack credentials are only for local development. Production requires managed credentials, TLS and production IdP/queue policy.
+- JWT revocation is not immediate: locally verified signed tokens remain acceptable until expiry unless the issuer rotates keys or changes validation policy.
