@@ -12,7 +12,18 @@ docker compose up -d --build --wait
 
 Compose provisions PostgreSQL, Keycloak, MiniStack SQS queues/policies, and starts the application. The service applies versioned SQL migrations at startup. Compose supplies its own container URLs; `.env.example` documents host-side local values and is not needed to start the Compose stack.
 
-The default local endpoints are API `http://localhost:8081`, Keycloak `http://localhost:8082`, PostgreSQL `localhost:54320`, and MiniStack `http://localhost:4566`.
+The default local endpoints are API `http://localhost:8081`, Keycloak `http://localhost:8082`, PostgreSQL `localhost:54320`, and the MiniStack SQS gateway `http://localhost:4566`.
+
+### Broker access (REQ-062, D12)
+
+MiniStack itself is not published: it treats the `test` key and unsigned requests as root, so all access goes through `sqs-gateway` (nginx), which forwards only requests signed by a provisioned IAM user and blocks the emulator's admin endpoints. `infra/localstack/init-sqs.sh` creates the identities and policies and fails closed (the broker stays unhealthy, so the application does not start, if any step fails): `wagering-producer` may only `SendMessage` to `wager-transactions.fifo` (a queue policy also denies every other principal), `wagering-app` consumes the inbound queue and publishes `wager-events.fifo`, `wagering-broker-operator` manages queues for tests/operations, and `wagering-provider-probe` has no queue access. The application reads its credentials from the `broker-credentials` volume (`AWS_PROFILE=wagering-app`). MiniStack does not verify SigV4 signatures, so an access key id is the effective credential locally; real SQS verifies signatures.
+
+To run host-side tests against the broker, copy the generated identities out (keys change whenever the broker container restarts):
+
+```sh
+infra/localstack/export-broker-credentials.sh
+export WAGERING_TEST_BROKER_CREDENTIALS_FILE="$PWD/tmp/broker-credentials"
+```
 
 Operational endpoints are `GET /health/live`, `GET /health/ready` (PostgreSQL and inbound SQS checks), and `GET /metrics` (Prometheus text format).
 
@@ -70,6 +81,7 @@ The default suite includes unit tests and skips live-dependency tests when their
 WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' go test ./internal/storage/pg ./internal/workers/reference ./internal/workers/outbox -count=1
 WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' \
 WAGERING_TEST_KEYCLOAK_URL='http://localhost:8082' WAGERING_TEST_SQS_ENDPOINT='http://localhost:4566' \
+WAGERING_TEST_BROKER_CREDENTIALS_FILE="$PWD/tmp/broker-credentials" WAGERING_TEST_COMPOSE_APP_URL='http://localhost:8081' \
 go test -p 1 ./tests/... -count=1
 ```
 
@@ -81,6 +93,7 @@ The independent-process recovery suite launches three `cmd/wagering` OS processe
 WAGERING_TEST_ADMIN_URL='postgres://wagering:wagering_password@localhost:54320/postgres?sslmode=disable' \
 WAGERING_TEST_KEYCLOAK_URL='http://localhost:8082' \
 WAGERING_TEST_SQS_ENDPOINT='http://localhost:4566' \
+WAGERING_TEST_BROKER_CREDENTIALS_FILE="$PWD/tmp/broker-credentials" \
 go test -race -count=1 ./tests/system
 ```
 

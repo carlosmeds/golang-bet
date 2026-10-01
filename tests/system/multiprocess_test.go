@@ -23,13 +23,12 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"wagering/tests/integration/auth/idptest"
+	"wagering/tests/integration/brokertest"
 )
 
 const (
@@ -54,6 +53,7 @@ type system struct {
 	internal, provider, providerID string
 	keycloak                       string
 	queue, events                  string
+	brokerKey, brokerSecret        string
 	sqs                            *sqs.Client
 }
 
@@ -309,18 +309,16 @@ func newSystem(t *testing.T, adminDSN, kc string) *system {
 	if out, e := build.CombinedOutput(); e != nil {
 		t.Fatalf("build fault-injection application: %v\n%s", e, out)
 	}
-	awsRegion := envOr("WAGERING_TEST_AWS_REGION", "us-east-1")
 	endpoint := envOr("WAGERING_TEST_SQS_ENDPOINT", "http://localhost:4566")
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(awsRegion), awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := sqs.NewFromConfig(awsCfg, func(o *sqs.Options) { o.BaseEndpoint = aws.String(endpoint) })
+	// The test queues are isolated, so both the harness and the spawned services
+	// sign as the broker operator (the service identity only covers the provisioned queues).
+	brokerKey, brokerSecret := brokertest.Credentials(t, brokertest.Operator)
+	client := brokertest.ClientWith(t, endpoint, brokerKey, brokerSecret)
 	q := createTestQueue(t, client, "t17-in-")
 	eq := createTestQueue(t, client, "t17-out-")
 	internal := idptest.Token(t, kc, idptest.Internal)
 	tok := idptest.Token(t, kc, idptest.ProviderA)
-	return &system{t: t, root: root, bin: bin, faultBin: faultBin, dsn: u.String(), pool: pool, client: &http.Client{Timeout: 10 * time.Second}, internal: internal, provider: tok, providerID: "provider-a", keycloak: kc, queue: q, events: eq, sqs: client}
+	return &system{t: t, root: root, bin: bin, faultBin: faultBin, dsn: u.String(), pool: pool, client: &http.Client{Timeout: 10 * time.Second}, internal: internal, provider: tok, providerID: "provider-a", keycloak: kc, queue: q, events: eq, sqs: client, brokerKey: brokerKey, brokerSecret: brokerSecret}
 }
 
 func createTestQueue(t *testing.T, client *sqs.Client, prefix string) string {
@@ -380,7 +378,7 @@ func (s *system) start(bin string, extra map[string]string) *process {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 	portEnv := map[string]string{
-		"DATABASE_URL": s.dsn, "HTTP_ADDR": addr, "AWS_REGION": envOr("WAGERING_TEST_AWS_REGION", "us-east-1"), "AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test",
+		"DATABASE_URL": s.dsn, "HTTP_ADDR": addr, "AWS_REGION": envOr("WAGERING_TEST_AWS_REGION", "us-east-1"), "AWS_ACCESS_KEY_ID": s.brokerKey, "AWS_SECRET_ACCESS_KEY": s.brokerSecret,
 		"SQS_ENDPOINT": envOr("WAGERING_TEST_SQS_ENDPOINT", "http://localhost:4566"), "WAGER_QUEUE_URL": s.queue, "EVENT_QUEUE_URL": s.events,
 		"OIDC_ISSUER_URL": idptest.Issuer(strings.TrimRight(os.Getenv(keycloakEnv), "/")), "OIDC_JWKS_URL": "", "OIDC_AUDIENCE": idptest.Audience, "SHUTDOWN_TIMEOUT": "10s",
 		"REFERENCE_RETRY_BASE_DELAY": "100ms", "REFERENCE_RETRY_MAX_DELAY": "100ms", "REFERENCE_RETRY_TTL": "2m", "REFERENCE_RETRY_MAX_ATTEMPTS": "0", "REFERENCE_WORKER_POLL_INTERVAL": "100ms",

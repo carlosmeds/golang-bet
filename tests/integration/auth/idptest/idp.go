@@ -30,7 +30,7 @@ import (
 // Realm and audience provisioned by infra/keycloak/realm-export.json.
 const (
 	Realm    = "wagering"
-	Audience = "account"
+	Audience = "wagering-api"
 )
 
 // Client is a Keycloak service-account client from the provisioned realm.

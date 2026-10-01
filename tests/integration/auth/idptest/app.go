@@ -25,6 +25,7 @@ import (
 	"wagering/internal/observability"
 	"wagering/internal/storage/pg"
 	"wagering/internal/workers/reference"
+	"wagering/tests/integration/brokertest"
 )
 
 // App is the real service (Fx composition of pg, auth, reference worker, SQS,
@@ -79,12 +80,12 @@ func StartApp(t *testing.T) *App {
 
 	t.Setenv("OIDC_JWKS_URL", "") // force discovery through the issuer
 	t.Setenv("OIDC_PROVIDER_CLAIM", "")
-	t.Setenv("AWS_ACCESS_KEY_ID", "test")
-	t.Setenv("AWS_SECRET_ACCESS_KEY", "test")
 	sqsEndpoint := strings.TrimRight(os.Getenv("WAGERING_TEST_SQS_ENDPOINT"), "/")
 	if sqsEndpoint == "" {
 		sqsEndpoint = "http://localhost:4566"
 	}
+	// The service signs with its provisioned least-privilege broker identity.
+	brokertest.SetProcessEnv(t, brokertest.App)
 	cfg := config.Config{
 		HTTPAddr:        addr,
 		DatabaseURL:     u.String(),

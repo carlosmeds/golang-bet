@@ -11,37 +11,28 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
-	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"wagering/internal/contract"
 	"wagering/internal/messaging/consumer"
 	wager "wagering/internal/usecase/wagering"
+	"wagering/tests/integration/brokertest"
 )
 
 // Mirrors infra/localstack/init-sqs.sh.
 const provisionedMaxReceiveCount = "3"
 
+// client signs as the broker operator: these tests create isolated queues.
 func client(t *testing.T) (*sqs.Client, string) {
 	t.Helper()
-	endpoint := strings.TrimRight(strings.TrimSpace(os.Getenv("WAGERING_TEST_SQS_ENDPOINT")), "/")
-	if endpoint == "" {
-		t.Skip("WAGERING_TEST_SQS_ENDPOINT is not set")
-	}
-	cfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion("us-east-1"),
-		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return sqs.NewFromConfig(cfg, func(o *sqs.Options) { o.BaseEndpoint = aws.String(endpoint) }), endpoint
+	endpoint := brokertest.Endpoint(t)
+	return brokertest.Client(t, endpoint, brokertest.Operator), endpoint
 }
 
 func randomName(t *testing.T, prefix string) string {

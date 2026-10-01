@@ -60,7 +60,7 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "account",
+            "included.custom.audience": "wagering-api",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -114,7 +114,7 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "account",
+            "included.custom.audience": "wagering-api",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -168,7 +168,7 @@
           "protocolMapper": "oidc-audience-mapper",
           "consentRequired": false,
           "config": {
-            "included.client.audience": "account",
+            "included.custom.audience": "wagering-api",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }

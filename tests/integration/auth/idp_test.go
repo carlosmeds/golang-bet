@@ -242,6 +242,8 @@ func TestRealTokenIsRefusedForAnotherAudienceOrIssuer(t *testing.T) {
 	token := idptest.Token(t, base, idptest.ProviderA)
 	for name, mutate := range map[string]func(*auth.Options){
 		"audience": func(o *auth.Options) { o.Audience = "another-service" },
+		// Keycloak's built-in client must not be accepted as the API audience (F-9).
+		"built-in account audience": func(o *auth.Options) { o.Audience = "account" },
 		// The realm's keys are reachable, but the expected issuer differs.
 		"issuer": func(o *auth.Options) {
 			o.Issuer = idptest.Issuer(base) + "-other"
