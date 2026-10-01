@@ -112,7 +112,7 @@ func (s *Service) Execute(ctx context.Context, op contract.Operation, key, corre
 				return false, ErrExternalIDConflict
 			}
 			if inbox != nil {
-				if e = writeInbox(ctx, tx, *inbox, old.Transaction.ID(), s.now()); e != nil {
+				if e = completeReplayInbox(ctx, tx, *inbox, old.Transaction.ID(), s.now()); e != nil {
 					return false, e
 				}
 			}
@@ -161,9 +161,10 @@ func (s *Service) Execute(ctx context.Context, op contract.Operation, key, corre
 	if err == nil {
 		return out, nil
 	}
-	// A concurrent request for the same provider/key may have won on another
-	// wallet; PostgreSQL unique violation aborted this tx. Read its committed
-	// snapshot in a fresh transaction and return a replay only for the same hash.
+	// A concurrent request for the same provider/key may have won while this
+	// transaction was in progress. PostgreSQL aborted it; read the committed
+	// snapshot in a fresh transaction and commit any SQS inbox identity with
+	// the replay before its caller can acknowledge the message.
 	var conflict *pg.Conflict
 	if errors.As(err, &conflict) && conflict.Constraint == schema.UniqueTransactionIdempotencyKey {
 		replayErr := s.Store.WithTx(ctx, func(tx *pg.Tx) error {
@@ -177,6 +178,11 @@ func (s *Service) Execute(ctx context.Context, op contract.Operation, key, corre
 			if old.Transaction.ExternalTransactionID() != op.ExternalTransactionID {
 				return ErrExternalIDConflict
 			}
+			if inbox != nil {
+				if e = completeReplayInbox(ctx, tx, *inbox, old.Transaction.ID(), s.now()); e != nil {
+					return e
+				}
+			}
 			out = Result{Transaction: old.Transaction, WalletVersion: old.ResultWalletVersion, Replay: true}
 			return nil
 		})
@@ -189,6 +195,22 @@ func (s *Service) Execute(ctx context.Context, op contract.Operation, key, corre
 		return Result{}, ErrExternalIDConflict
 	}
 	return Result{}, err
+}
+func completeReplayInbox(ctx context.Context, tx *pg.Tx, in Inbox, transaction domain.UUID, now time.Time) error {
+	existing, linked, err := tx.GetInbox(ctx, in.Consumer, in.MessageID)
+	if err == nil {
+		if err = existing.CheckReplay(in.PayloadHash); err != nil {
+			return err
+		}
+		if !existing.IsCompleted() || linked == nil || *linked != transaction {
+			return ErrInboxIncomplete
+		}
+		return nil
+	}
+	if !errors.Is(err, pg.ErrNotFound) {
+		return err
+	}
+	return writeInbox(ctx, tx, in, transaction, now)
 }
 func writeInbox(ctx context.Context, tx *pg.Tx, in Inbox, transaction domain.UUID, now time.Time) error {
 	m, err := domain.NewInboxMessage(in.Consumer, in.MessageID, in.PayloadHash, now)

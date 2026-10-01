@@ -241,6 +241,99 @@ func TestDuplicateConcurrentBet(t *testing.T) {
 	}
 }
 
+func TestConcurrentHTTPAndSQSReplayCompletesInbox(t *testing.T) {
+	s := store(t)
+	ctx := context.Background()
+	opened, err := walletuse.New(s).Open(ctx, "player", amount(10000), "opening")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := wager.New(s)
+	operation := op("cross-transport", "", domain.KindBet, opened.Wallet.ID(), amount(1000))
+	inbox := &wager.Inbox{Consumer: "inbound", MessageID: "sqs-cross-transport", PayloadHash: strings.Repeat("a", 64)}
+	type response struct {
+		result wager.Result
+		err    error
+	}
+	start := make(chan struct{})
+	httpResult, sqsResult := make(chan response, 1), make(chan response, 1)
+	go func() {
+		<-start
+		result, e := svc.Execute(ctx, operation, "cross-transport-key", "http", nil)
+		httpResult <- response{result, e}
+	}()
+	go func() {
+		<-start
+		result, e := svc.Execute(ctx, operation, "cross-transport-key", "sqs", inbox)
+		sqsResult <- response{result, e}
+	}()
+	close(start)
+	http, sqs := <-httpResult, <-sqsResult
+	if http.err != nil || sqs.err != nil {
+		t.Fatalf("HTTP error=%v, SQS error=%v", http.err, sqs.err)
+	}
+	if http.result.Transaction.ID() != sqs.result.Transaction.ID() || http.result.Replay == sqs.result.Replay {
+		t.Fatalf("HTTP and SQS must share one result, with one replay: HTTP=%+v SQS=%+v", http.result, sqs.result)
+	}
+	if err := s.WithTx(ctx, func(tx *pg.Tx) error {
+		stored, linked, e := tx.GetInbox(ctx, inbox.Consumer, inbox.MessageID)
+		if e != nil {
+			return e
+		}
+		if !stored.IsCompleted() || stored.RequestHash() != inbox.PayloadHash || linked == nil || *linked != sqs.result.Transaction.ID() {
+			return fmt.Errorf("inbox not completed for winner: completed=%t linked=%v", stored.IsCompleted(), linked)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var transactions, movements int
+	if err := s.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM wager_transactions WHERE external_transaction_id='cross-transport'), (SELECT count(*) FROM ledger_entries WHERE transaction_id=$1)`, sqs.result.Transaction.ID().String()).Scan(&transactions, &movements); err != nil {
+		t.Fatal(err)
+	}
+	if transactions != 1 || movements != 1 {
+		t.Fatalf("transactions=%d financial movements=%d", transactions, movements)
+	}
+	again, err := svc.Execute(ctx, operation, "cross-transport-key", "sqs-replay", inbox)
+	if err != nil || !again.Replay || again.Transaction.ID() != sqs.result.Transaction.ID() {
+		t.Fatalf("SQS replay: %+v %v", again, err)
+	}
+	changed := *inbox
+	changed.PayloadHash = strings.Repeat("b", 64)
+	if _, err := svc.Execute(ctx, operation, "cross-transport-key", "sqs-conflict", &changed); !errors.Is(err, domain.ErrInboxHashConflict) {
+		t.Fatalf("reused message ID with different hash: %v", err)
+	}
+	changedOperation := operation
+	changedOperation.Money = amount(2000)
+	otherInbox := &wager.Inbox{Consumer: inbox.Consumer, MessageID: "sqs-changed-operation", PayloadHash: strings.Repeat("c", 64)}
+	if _, err := svc.Execute(ctx, changedOperation, "cross-transport-key", "hash-conflict", otherInbox); !errors.Is(err, domain.ErrHashMismatch) {
+		t.Fatalf("reused key with different operation: %v", err)
+	}
+	otherInbox.MessageID = "sqs-changed-key"
+	if _, err := svc.Execute(ctx, operation, "another-key", "external-conflict", otherInbox); !errors.Is(err, wager.ErrExternalIDConflict) {
+		t.Fatalf("reused external ID with another key: %v", err)
+	}
+	var conflictingInboxRows int
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) FROM inbox_messages WHERE consumer=$1 AND message_id IN ('sqs-changed-operation','sqs-changed-key')`, inbox.Consumer).Scan(&conflictingInboxRows); err != nil {
+		t.Fatal(err)
+	}
+	if conflictingInboxRows != 0 {
+		t.Fatalf("conflicting deliveries wrote %d inbox rows", conflictingInboxRows)
+	}
+	if err := s.WithTx(ctx, func(tx *pg.Tx) error {
+		wallet, e := tx.GetWallet(ctx, opened.Wallet.ID())
+		if e != nil {
+			return e
+		}
+		if wallet.Balance().Minor() != 9000 || wallet.Version() != 2 {
+			return fmt.Errorf("wallet balance=%s version=%d", wallet.Balance(), wallet.Version())
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCompetingReversals(t *testing.T) {
 	s := store(t)
 	ctx := context.Background()
