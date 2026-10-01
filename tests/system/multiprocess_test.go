@@ -73,6 +73,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	}
 
 	t.Run("50 duplicate BETs through three independent processes", func(t *testing.T) {
+		s.ensureApps(t, 3)
 		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "100.00")
 		op := s.operation("race-50", wallet, player, "BET", "1.00")
@@ -98,6 +99,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	})
 
 	t.Run("two 80 BETs compete for 100 and independent wallets proceed", func(t *testing.T) {
+		s.ensureApps(t, 3)
 		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "100.00")
 		ops := [][]byte{mustJSON(t, s.operation("race-80-a", wallet, player, "BET", "80.00")), mustJSON(t, s.operation("race-80-b", wallet, player, "BET", "80.00"))}
@@ -146,6 +148,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	})
 
 	t.Run("HTTP SQS crossing, commit-before-delete crash, restart replay", func(t *testing.T) {
+		s.ensureApps(t, 3)
 		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "50.00")
 		op := s.operation("cross-transport-crash", wallet, player, "BET", "7.00")
@@ -158,11 +161,15 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		s.stopAll()
 		marker := filepath.Join(t.TempDir(), "committed")
 		fault := s.start(s.faultBin, map[string]string{"WAGERING_FAULT_AFTER_COMMIT_MARKER": marker})
+		s.apps = append(s.apps, fault)
 		s.sendSQS(t, body, wallet)
 		waitFile(t, marker, 30*time.Second)
-		if raw, err := os.ReadFile(marker); err != nil || string(raw) != msgID {
+		if raw, err := os.ReadFile(marker); err != nil || len(raw) == 0 {
 			t.Fatalf("fault marker=%q err=%v", raw, err)
 		}
+		waitFor(t, 10*time.Second, func() bool {
+			return s.count(t, `SELECT count(*) FROM inbox_messages WHERE message_id='`+msgID+`' AND completed_at IS NOT NULL`) == 1
+		})
 		fault.kill(t)
 		s.apps = nil
 		for i := 0; i < 3; i++ {
@@ -195,6 +202,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	})
 
 	t.Run("pending reference resumes after restart and ledger reconciles", func(t *testing.T) {
+		s.ensureApps(t, 3)
 		s.refreshTokens(t)
 		wallet, player := s.openWallet(t, s.apps[0], "50.00")
 		refund := s.operation("refund-arrives-first", wallet, player, "REFUND", "10.00")
@@ -220,6 +228,7 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 	})
 
 	t.Run("claimed outbox recovers into a second publisher process", func(t *testing.T) {
+		s.ensureApps(t, 3)
 		s.refreshTokens(t)
 		waitFor(t, 30*time.Second, func() bool { return s.count(t, "SELECT count(*) FROM outbox_events WHERE published_at IS NULL") == 0 })
 		s.stopAll()
@@ -306,17 +315,59 @@ func newSystem(t *testing.T, adminDSN, kc string) *system {
 		t.Fatal(err)
 	}
 	client := sqs.NewFromConfig(awsCfg, func(o *sqs.Options) { o.BaseEndpoint = aws.String(endpoint) })
-	q := envOr("WAGERING_TEST_QUEUE_URL", "http://localhost:4566/000000000000/wager-transactions.fifo")
-	eq := envOr("WAGERING_TEST_EVENT_QUEUE_URL", "http://localhost:4566/000000000000/wager-events.fifo")
+	q := createTestQueue(t, client, "t17-in-")
+	eq := createTestQueue(t, client, "t17-out-")
 	internal := idptest.Token(t, kc, idptest.Internal)
 	tok := idptest.Token(t, kc, idptest.ProviderA)
 	return &system{t: t, root: root, bin: bin, faultBin: faultBin, dsn: u.String(), pool: pool, client: &http.Client{Timeout: 10 * time.Second}, internal: internal, provider: tok, providerID: "provider-a", keycloak: kc, queue: q, events: eq, sqs: client}
+}
+
+func createTestQueue(t *testing.T, client *sqs.Client, prefix string) string {
+	t.Helper()
+	name := prefix + strings.ReplaceAll(randomID(t), "-", "") + ".fifo"
+	created, err := client.CreateQueue(context.Background(), &sqs.CreateQueueInput{
+		QueueName: aws.String(name),
+		Attributes: map[string]string{
+			string(types.QueueAttributeNameFifoQueue):                 "true",
+			string(types.QueueAttributeNameContentBasedDeduplication): "false",
+		},
+	})
+	if err != nil {
+		t.Fatalf("create isolated T17 queue %s: %v", name, err)
+	}
+	queueURL := aws.ToString(created.QueueUrl)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := client.DeleteQueue(ctx, &sqs.DeleteQueueInput{QueueUrl: aws.String(queueURL)}); err != nil {
+			t.Errorf("delete isolated T17 queue %s: %v", name, err)
+		}
+	})
+	return queueURL
 }
 
 func (s *system) refreshTokens(t *testing.T) {
 	t.Helper()
 	s.internal = idptest.Token(t, s.keycloak, idptest.Internal)
 	s.provider = idptest.Token(t, s.keycloak, idptest.ProviderA)
+}
+
+func (s *system) ensureApps(t *testing.T, count int) {
+	t.Helper()
+	live := s.apps[:0]
+	for _, p := range s.apps {
+		select {
+		case <-p.done:
+		default:
+			live = append(live, p)
+		}
+	}
+	s.apps = live
+	for len(s.apps) < count {
+		p := s.start(s.bin, nil)
+		s.apps = append(s.apps, p)
+		s.ready(p)
+	}
 }
 
 func (s *system) start(bin string, extra map[string]string) *process {
