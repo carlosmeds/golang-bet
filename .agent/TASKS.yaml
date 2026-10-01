@@ -477,7 +477,7 @@ tasks:
   reasoning_effort: medium
   orca_task_id: task_94b6d40c5564
 - id: R19-F7
-  state: active
+  state: complete
   title: Add missing independent-wallet and cross-transport races
   depends_on: []
   parallel_group: adversarial_repairs
@@ -490,6 +490,7 @@ tasks:
   actual_model: gpt-6-sol
   orca_task_id: task_b039d9bce492
   orca_dispatch_id: ctx_da112037687d
+  commit: 02aac3d
 - id: R19-F8
   state: complete
   title: Apply configured shutdown timeout
@@ -505,7 +506,7 @@ tasks:
   orca_dispatch_id: ctx_2104afb83cbf
   commit: 7d1906f
 - id: R19-F10A
-  state: active
+  state: complete
   title: Persist inbox identity on concurrent idempotency replay
   depends_on: []
   parallel_group: adversarial_repairs
@@ -518,8 +519,9 @@ tasks:
   orca_task_id: task_57b42ce79c79
   orca_dispatch_id: ctx_5994a533c8cd
   actual_model: gpt-6-sol
+  commit: bb4b575
 - id: R19-F10B
-  state: active
+  state: complete
   title: Honor reference retry leases and schedules
   depends_on: []
   parallel_group: adversarial_repairs
@@ -532,6 +534,7 @@ tasks:
   orca_task_id: task_23a4dd64498e
   orca_dispatch_id: ctx_cee02a17d020
   actual_model: claude-sonnet-5-5
+  commit: 5835600
 - id: R19-F10C
   state: complete
   title: Add missing request identifiers to logs and tidy modules
@@ -548,7 +551,7 @@ tasks:
   orca_dispatch_id: ctx_de53c8c0c362
   commit: b68334f
 - id: R19-F11
-  state: pending
+  state: active
   title: Stabilize T17 crash-window scenarios under the race detector
   depends_on:
   - R19-F7
@@ -560,6 +563,8 @@ tasks:
   model_tier: standard
   reasoning_effort: high
   orca_task_id: task_169caccb7d64
+  orca_dispatch_id: ctx_bfaac64f3da9
+  actual_model: gpt-6-sol
 parallel_sets:
 - after: []
   can_run:
