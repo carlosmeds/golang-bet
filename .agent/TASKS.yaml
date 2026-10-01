@@ -581,6 +581,7 @@ tasks:
   model_tier: standard
   reasoning_effort: medium
   actual_model: gpt-6-sol
+  commit: b522ec4
 parallel_sets:
 - after: []
   can_run:
