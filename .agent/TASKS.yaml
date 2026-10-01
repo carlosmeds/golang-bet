@@ -568,7 +568,7 @@ tasks:
   orca_dispatch_id: ctx_e2ed83a1c28c
   actual_model: gpt-6-sol
 - id: R19-F12
-  state: active
+  state: complete
   title: Grant the metrics poller scoped DLQ read access
   depends_on:
   - R19-F1
