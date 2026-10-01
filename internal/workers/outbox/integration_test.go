@@ -219,9 +219,20 @@ func TestPublishesCommittedEventsOnceWithStableIdentity(t *testing.T) {
 	ids := []domain.UUID{e.insert(agg, 1), e.insert(agg, 2), e.insert(agg, 3)}
 	q := &sink{}
 	p := e.publisher(e.store, testConfig("pub-a"), q)
-	st, err := p.RunOnce(context.Background())
-	if err != nil || st.Published != 3 {
-		t.Fatalf("stats %+v err %v", st, err)
+	var total outbox.Stats
+	for i := 0; i < len(ids); i++ {
+		st, err := p.RunOnce(context.Background())
+		if err != nil {
+			t.Fatalf("run %d: stats %+v err %v", i, st, err)
+		}
+		total.Claimed += st.Claimed
+		total.Published += st.Published
+		if st.Claimed == 0 {
+			break
+		}
+	}
+	if total.Published != 3 {
+		t.Fatalf("stats %+v; want all three ordered events published", total)
 	}
 	msgs := q.all()
 	if len(msgs) != 3 {
@@ -253,16 +264,19 @@ func TestClaimedEventsCarryTheOutboxSequence(t *testing.T) {
 	e := newEnv(t)
 	agg := domain.NewUUID()
 	ids := []domain.UUID{e.insert(agg, 1), e.insert(agg, 2), e.insert(agg, 3)}
-	got, err := e.store.ClaimOutbox(context.Background(), "pub-a", 10, time.Minute)
-	if err != nil || len(got) != 3 {
-		t.Fatalf("claim: %v %v", got, err)
-	}
-	bySeq := map[domain.UUID]int64{}
-	for _, c := range got {
-		bySeq[c.EventID] = c.Seq
-	}
-	if !(bySeq[ids[0]] > 0 && bySeq[ids[0]] < bySeq[ids[1]] && bySeq[ids[1]] < bySeq[ids[2]]) {
-		t.Fatalf("seq must follow insertion order: %v", bySeq)
+	var previous int64
+	for i, expectedID := range ids {
+		got, err := e.store.ClaimOutbox(context.Background(), "pub-a", 10, time.Minute)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("claim %d: %v %v", i, got, err)
+		}
+		if got[0].EventID != expectedID || got[0].Seq <= previous {
+			t.Fatalf("claim %d event/sequence=%s/%d, want %s and seq > %d", i, got[0].EventID, got[0].Seq, expectedID, previous)
+		}
+		previous = got[0].Seq
+		if err := e.store.MarkPublished(context.Background(), got[0].EventID, "pub-a"); err != nil {
+			t.Fatalf("mark event %s published: %v", expectedID, err)
+		}
 	}
 }
 
@@ -507,7 +521,7 @@ func TestFailedEventDoesNotLetLaterEventOfSameAggregateOvertake(t *testing.T) {
 	}}
 	p := e.publisher(e.store, testConfig("pub-a"), q)
 	st, err := p.RunOnce(context.Background())
-	if err != nil || st.Retried != 1 || st.Skipped != 1 || st.Published != 1 {
+	if err != nil || st.Retried != 1 || st.Skipped != 0 || st.Published != 1 || st.Claimed != 2 {
 		t.Fatalf("stats %+v err %v", st, err)
 	}
 	if q.countBy(second) != 0 || q.countBy(other) != 1 {
