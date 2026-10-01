@@ -162,8 +162,9 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		marker := filepath.Join(t.TempDir(), "committed")
 		fault := s.start(s.faultBin, map[string]string{"WAGERING_FAULT_AFTER_COMMIT_MARKER": marker})
 		s.apps = append(s.apps, fault)
+		s.ready(fault)
 		s.sendSQS(t, body, wallet)
-		waitFile(t, marker, 30*time.Second)
+		waitFile(t, marker, 30*time.Second, fault)
 		if raw, err := os.ReadFile(marker); err != nil || len(raw) == 0 {
 			t.Fatalf("fault marker=%q err=%v", raw, err)
 		}
@@ -688,9 +689,25 @@ func merge(a map[string]any, b map[string]any) map[string]any {
 	}
 	return out
 }
-func waitFile(t *testing.T, path string, d time.Duration) {
+func waitFile(t *testing.T, path string, d time.Duration, processes ...*process) {
 	t.Helper()
-	waitFor(t, d, func() bool { _, e := os.Stat(path); return e == nil })
+	until := time.Now().Add(d)
+	for time.Now().Before(until) {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var logs strings.Builder
+	for _, p := range processes {
+		if p == nil {
+			continue
+		}
+		if raw, err := os.ReadFile(p.logPath); err == nil {
+			fmt.Fprintf(&logs, "\nprocess %s log:\n%s", p.base, raw)
+		}
+	}
+	t.Fatalf("marker %s not created within %s%s", path, d, logs.String())
 }
 func waitFor(t *testing.T, d time.Duration, condition func() bool) {
 	t.Helper()
