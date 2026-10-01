@@ -6,6 +6,7 @@ import (
 	"os"
 	"wagering/internal/auth"
 	"wagering/internal/bootstrap"
+	"wagering/internal/config"
 	"wagering/internal/httpapi"
 	"wagering/internal/messaging/consumer"
 	"wagering/internal/messaging/sqsclient"
@@ -16,6 +17,11 @@ import (
 )
 
 func main() {
+	c, err := config.Load()
+	if err != nil {
+		slog.Error("invalid process configuration", "error", err)
+		os.Exit(1)
+	}
 	logger := fx.Provide(func() *slog.Logger { return slog.New(slog.NewJSONHandler(os.Stdout, nil)) })
-	bootstrap.New(logger, fx.Invoke(func(l *slog.Logger) { slog.SetDefault(l) }), observability.Module, pg.Module, auth.Module, reference.Module, sqsclient.Module, consumer.Module, outbox.Module, httpapi.Module).Run()
+	bootstrap.NewWithConfig(c, logger, fx.Invoke(func(l *slog.Logger) { slog.SetDefault(l) }), observability.Module, pg.Module, auth.Module, reference.Module, sqsclient.Module, consumer.Module, outbox.Module, httpapi.Module).Run()
 }
