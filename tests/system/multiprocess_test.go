@@ -127,6 +127,33 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 			t.Fatalf("80 BET results=%v; want one commit and one business rejection", codes)
 		}
 		s.assertWallet(t, wallet, 2000, 2)
+		if n := s.walletLedgerCount(t, wallet); n != 2 {
+			t.Fatalf("80/80 ledger entries=%d; want opening and one BET", n)
+		}
+		for i, body := range ops {
+			resp := s.request(s.apps[(i+1)%len(s.apps)], http.MethodPost, "/wagering/transactions", s.provider, "race-80-key-"+fmt.Sprint(i), body)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("80 BET %d replay status=%d body=%s", i, resp.StatusCode, resp.Body)
+			}
+			var replay struct {
+				Status           string `json:"status"`
+				IdempotentReplay bool   `json:"idempotentReplay"`
+			}
+			if err := json.Unmarshal(resp.Body, &replay); err != nil {
+				t.Fatal(err)
+			}
+			wantStatus := "PROCESSED"
+			if codes[i] == http.StatusUnprocessableEntity {
+				wantStatus = "REJECTED"
+			}
+			if !replay.IdempotentReplay || replay.Status != wantStatus {
+				t.Fatalf("80 BET %d replay=%+v; want %s replay", i, replay, wantStatus)
+			}
+		}
+		s.assertWallet(t, wallet, 2000, 2)
+		if n := s.walletLedgerCount(t, wallet); n != 2 {
+			t.Fatalf("80/80 ledger entries after both replays=%d", n)
+		}
 
 		w1, p1 := s.openWallet(t, s.apps[0], "25.00")
 		w2, p2 := s.openWallet(t, s.apps[1], "25.00")
@@ -145,6 +172,105 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		}
 		s.assertWallet(t, w1, 0, 2)
 		s.assertWallet(t, w2, 0, 2)
+
+		// A real row lock on A must block an A wager while B still commits.
+		lockedA, aPlayer := s.openWallet(t, s.apps[0], "25.00")
+		freeB, bPlayer := s.openWallet(t, s.apps[1], "25.00")
+		lock := s.lockWalletRow(t, lockedA)
+		defer lock.Rollback(context.Background())
+		aBody := mustJSON(t, s.operation("locked-a", lockedA, aPlayer, "BET", "5.00"))
+		aResult := make(chan int, 1)
+		go func() {
+			aResult <- s.submit(s.apps[0], s.provider, "locked-a-key", aBody)
+		}()
+		s.waitForWalletLockWaiters(t, 1)
+		if code := s.submit(s.apps[1], s.provider, "free-b-key", mustJSON(t, s.operation("free-b", freeB, bPlayer, "BET", "5.00"))); code != http.StatusCreated {
+			t.Fatalf("wallet B status while A row locked=%d", code)
+		}
+		select {
+		case code := <-aResult:
+			t.Fatalf("wallet A completed before its lock released: status=%d", code)
+		default:
+		}
+		s.assertWallet(t, freeB, 2000, 2)
+		s.assertWallet(t, lockedA, 2500, 1)
+		if err := lock.Rollback(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case code := <-aResult:
+			if code != http.StatusCreated {
+				t.Fatalf("wallet A status after lock release=%d", code)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("wallet A did not complete after row lock release")
+		}
+		s.assertWallet(t, lockedA, 2000, 2)
+	})
+
+	t.Run("HTTP and SQS race for one operation across processes", func(t *testing.T) {
+		s.stopAll()
+		s.apps = nil
+		s.queue = createTestQueue(s.t, s.sqs, "t17-race-in-")
+		// The HTTP target polls a separate isolated queue, so the racing SQS
+		// request is necessarily handled by another application process.
+		httpQueue := createTestQueue(s.t, s.sqs, "t17-http-only-")
+		s.apps = append(s.apps, s.start(s.bin, map[string]string{"WAGER_QUEUE_URL": httpQueue}))
+		s.apps = append(s.apps, s.start(s.bin, nil))
+		s.apps = append(s.apps, s.start(s.bin, nil))
+		for _, p := range s.apps {
+			s.ready(p)
+		}
+		s.refreshTokens(t)
+		wallet, player := s.openWallet(t, s.apps[0], "50.00")
+		op := s.operation("cross-transport-race", wallet, player, "BET", "7.00")
+		key := "cross-transport-race-key"
+		body := mustJSON(t, op)
+		msgID := randomID(t)
+		message := mustJSON(t, map[string]any{"messageId": msgID, "type": "WagerTransactionRequested", "occurredAt": time.Now().UTC().Format(time.RFC3339Nano), "data": merge(op, map[string]any{"idempotencyKey": key})})
+		lock := s.lockWalletRow(t, wallet)
+		defer lock.Rollback(context.Background())
+		httpResult := make(chan int, 1)
+		go func() { httpResult <- s.submit(s.apps[0], s.provider, key, body) }()
+		s.waitForWalletLockWaiters(t, 1)
+		s.sendSQS(t, message, wallet)
+		s.waitForWalletLockWaiters(t, 2)
+		select {
+		case code := <-httpResult:
+			t.Fatalf("HTTP completed while wallet row was locked: status=%d", code)
+		default:
+		}
+		if err := lock.Rollback(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case code := <-httpResult:
+			if code != http.StatusCreated && code != http.StatusOK {
+				t.Fatalf("racing HTTP status=%d", code)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("racing HTTP did not finish after lock release")
+		}
+		waitFor(t, 10*time.Second, func() bool {
+			return s.count(t, `SELECT count(*) FROM inbox_messages WHERE message_id='`+msgID+`' AND completed_at IS NOT NULL`) == 1
+		})
+		if !s.inboundQueueEmpty(t, 10*time.Second) {
+			t.Fatal("racing SQS message was not deleted after commit")
+		}
+		s.assertWallet(t, wallet, 4300, 2)
+		if n := s.count(t, `SELECT count(*) FROM wager_transactions WHERE external_transaction_id='cross-transport-race'`); n != 1 {
+			t.Fatalf("racing transaction count=%d", n)
+		}
+		if n := s.walletLedgerCount(t, wallet); n != 2 {
+			t.Fatalf("racing ledger entries=%d", n)
+		}
+		if code := s.submit(s.apps[0], s.provider, key, body); code != http.StatusOK {
+			t.Fatalf("racing HTTP replay status=%d", code)
+		}
+		s.assertWallet(t, wallet, 4300, 2)
+		if n := s.walletLedgerCount(t, wallet); n != 2 {
+			t.Fatalf("ledger entries after HTTP/SQS replays=%d", n)
+		}
 	})
 
 	t.Run("HTTP SQS crossing, commit-before-delete crash, restart replay", func(t *testing.T) {
@@ -159,6 +285,8 @@ func TestThreeProcessConcurrencyAndRecovery(t *testing.T) {
 		msgID := randomID(t)
 		body := mustJSON(t, map[string]any{"messageId": msgID, "type": "WagerTransactionRequested", "occurredAt": time.Now().UTC().Format(time.RFC3339Nano), "data": merge(op, map[string]any{"idempotencyKey": key})})
 		s.stopAll()
+		// Give crash and redelivery a fresh FIFO queue after the race scenario.
+		s.queue = createTestQueue(s.t, s.sqs, "t17-crash-in-")
 		marker := filepath.Join(t.TempDir(), "committed")
 		fault := s.start(s.faultBin, map[string]string{"WAGERING_FAULT_AFTER_COMMIT_MARKER": marker})
 		s.apps = append(s.apps, fault)
@@ -318,7 +446,7 @@ func newSystem(t *testing.T, adminDSN, kc string) *system {
 	eq := createTestQueue(t, client, "t17-out-")
 	internal := idptest.Token(t, kc, idptest.Internal)
 	tok := idptest.Token(t, kc, idptest.ProviderA)
-	return &system{t: t, root: root, bin: bin, faultBin: faultBin, dsn: u.String(), pool: pool, client: &http.Client{Timeout: 10 * time.Second}, internal: internal, provider: tok, providerID: "provider-a", keycloak: kc, queue: q, events: eq, sqs: client, brokerKey: brokerKey, brokerSecret: brokerSecret}
+	return &system{t: t, root: root, bin: bin, faultBin: faultBin, dsn: u.String(), pool: pool, client: &http.Client{Timeout: 60 * time.Second}, internal: internal, provider: tok, providerID: "provider-a", keycloak: kc, queue: q, events: eq, sqs: client, brokerKey: brokerKey, brokerSecret: brokerSecret}
 }
 
 func createTestQueue(t *testing.T, client *sqs.Client, prefix string) string {
@@ -558,6 +686,33 @@ func (s *system) count(t *testing.T, query string) int64 {
 		t.Fatalf("query count: %v", e)
 	}
 	return n
+}
+func (s *system) walletLedgerCount(t *testing.T, wallet string) int64 {
+	t.Helper()
+	var n int64
+	if err := s.pool.QueryRow(context.Background(), `SELECT count(*) FROM ledger_entries WHERE wallet_id=$1`, wallet).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+func (s *system) lockWalletRow(t *testing.T, wallet string) pgx.Tx {
+	t.Helper()
+	tx, err := s.pool.Begin(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	if err := tx.QueryRow(context.Background(), `SELECT id::text FROM wallets WHERE id=$1 FOR UPDATE`, wallet).Scan(&id); err != nil {
+		_ = tx.Rollback(context.Background())
+		t.Fatal(err)
+	}
+	return tx
+}
+func (s *system) waitForWalletLockWaiters(t *testing.T, want int64) {
+	t.Helper()
+	waitFor(t, 30*time.Second, func() bool {
+		return s.count(t, `SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND wait_event_type='Lock' AND query LIKE '%FROM wallets%' AND query LIKE '%FOR UPDATE%'`) >= want
+	})
 }
 func (s *system) assertWallet(t *testing.T, id string, minor, version int64) {
 	t.Helper()
