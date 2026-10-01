@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"sync"
@@ -32,13 +33,16 @@ type Config struct {
 	VisibilitySeconds int32
 	MaxMessages       int32
 	PollErrorDelay    time.Duration
+	// MaxBackoffSeconds caps the exponential visibility backoff (1s, 2s, 4s, ...)
+	// applied to a message whose processing failed transiently.
+	MaxBackoffSeconds int32
 }
 
 func DefaultConfig(queue string) Config {
-	return Config{QueueURL: queue, ConsumerName: "wager-transactions", WaitSeconds: 10, VisibilitySeconds: 60, MaxMessages: 10, PollErrorDelay: time.Second}
+	return Config{QueueURL: queue, ConsumerName: "wager-transactions", WaitSeconds: 10, VisibilitySeconds: 60, MaxMessages: 10, PollErrorDelay: time.Second, MaxBackoffSeconds: 60}
 }
 func (c Config) Validate() error {
-	if c.QueueURL == "" || c.ConsumerName == "" || c.WaitSeconds < 0 || c.WaitSeconds > 20 || c.VisibilitySeconds < 1 || c.VisibilitySeconds > 43200 || c.MaxMessages < 1 || c.MaxMessages > 10 || c.PollErrorDelay <= 0 {
+	if c.QueueURL == "" || c.ConsumerName == "" || c.WaitSeconds < 0 || c.WaitSeconds > 20 || c.VisibilitySeconds < 1 || c.VisibilitySeconds > 43200 || c.MaxMessages < 1 || c.MaxMessages > 10 || c.PollErrorDelay <= 0 || c.MaxBackoffSeconds < 1 || c.MaxBackoffSeconds > 43200 {
 		return errors.New("invalid SQS consumer configuration")
 	}
 	return nil
@@ -54,8 +58,22 @@ type Observer interface {
 	CountConflict()
 }
 
+// ErrDependencyUnavailable is returned by RunOnce while the readiness probe
+// fails. No message is received in that state, so an outage does not consume
+// the queue's redrive budget (maxReceiveCount) for messages that are valid.
+var ErrDependencyUnavailable = errors.New("processing dependency unavailable; receives paused")
+
+// transientError marks a processing failure that should be retried (as opposed
+// to a poison message that is left for redrive).
+type transientError struct{ error }
+
+func (e transientError) Unwrap() error { return e.error }
+
 type Worker struct {
-	API      API
+	API API
+	// Ready reports whether durable processing (PostgreSQL) is available. When
+	// it returns an error the worker pauses receiving. Nil disables the gate.
+	Ready    func(context.Context) error
 	Service  Processor
 	Config   Config
 	Logger   *slog.Logger
@@ -108,23 +126,60 @@ func (w *Worker) Stop(ctx context.Context) error {
 	}
 }
 func (w *Worker) Run(ctx context.Context) {
+	paused := false
 	for ctx.Err() == nil {
-		if err := w.RunOnce(ctx); err != nil && ctx.Err() == nil {
-			w.Logger.ErrorContext(ctx, "SQS poll failed", "error", err)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(w.Config.PollErrorDelay):
+		err := w.RunOnce(ctx)
+		switch {
+		case err == nil:
+			if paused {
+				paused = false
+				w.Logger.InfoContext(ctx, "SQS receives resumed: dependency available again")
 			}
+			continue
+		case ctx.Err() != nil:
+			return
+		case errors.Is(err, ErrDependencyUnavailable):
+			if !paused {
+				paused = true
+				w.Logger.WarnContext(ctx, "SQS receives paused: dependency unavailable; messages stay on the queue", "error", err)
+			}
+		default:
+			w.Logger.ErrorContext(ctx, "SQS poll failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(w.Config.PollErrorDelay):
 		}
 	}
 }
+
+// checkReady probes the processing dependency within a short bound.
+func (w *Worker) checkReady(ctx context.Context) error {
+	if w.Ready == nil {
+		return nil
+	}
+	probe, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := w.Ready(probe); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("%w: %v", ErrDependencyUnavailable, err)
+	}
+	return nil
+}
+
 func (w *Worker) RunOnce(ctx context.Context) error {
+	if err := w.checkReady(ctx); err != nil {
+		return err
+	}
 	c := w.Config
 	out, err := w.API.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{QueueUrl: aws.String(c.QueueURL), MaxNumberOfMessages: c.MaxMessages, WaitTimeSeconds: c.WaitSeconds, VisibilityTimeout: c.VisibilitySeconds, MessageSystemAttributeNames: []types.MessageSystemAttributeName{types.MessageSystemAttributeNameApproximateReceiveCount}})
 	if err != nil {
 		return err
 	}
+	failedTransiently := false
 	for i, message := range out.Messages {
 		if ctx.Err() != nil {
 			for _, unstarted := range out.Messages[i:] {
@@ -132,8 +187,22 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			}
 			return ctx.Err()
 		}
+		if failedTransiently {
+			// An earlier message of this batch hit a transient failure: do not
+			// spend further attempts on a dependency that is still down.
+			if err := w.checkReady(ctx); err != nil {
+				for _, unstarted := range out.Messages[i:] {
+					_ = w.release(context.Background(), unstarted)
+				}
+				return err
+			}
+		}
 		if err := w.handle(ctx, message); err != nil {
 			w.Logger.WarnContext(ctx, "SQS message not committed", "sqsMessageId", aws.ToString(message.MessageId), "error", err)
+			var te transientError
+			if errors.As(err, &te) {
+				failedTransiently = true
+			}
 			if ctx.Err() != nil {
 				_ = w.release(context.Background(), message)
 			}
@@ -164,12 +233,12 @@ func (w *Worker) handle(ctx context.Context, m types.Message) error {
 			w.Observer.CountRetry()
 		}
 		count := receiveCount(m)
-		delay := backoffSeconds(count)
+		delay := backoffSeconds(count, w.Config.MaxBackoffSeconds)
 		_, changeErr := w.API.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{QueueUrl: aws.String(w.Config.QueueURL), ReceiptHandle: aws.String(receipt), VisibilityTimeout: delay})
 		if changeErr != nil {
-			return errors.Join(err, changeErr)
+			return transientError{errors.Join(err, changeErr)}
 		}
-		return err
+		return transientError{err}
 	}
 	// PROCESSED, REJECTED and PENDING_REFERENCE all have durable records. The
 	// latter is resumed by the reference worker, independent of this SQS receipt.
@@ -212,15 +281,15 @@ func receiveCount(m types.Message) int {
 	}
 	return n
 }
-func backoffSeconds(attempt int) int32 {
+
+// backoffSeconds is the visibility delay after the attempt-th receive: 1s, 2s,
+// 4s, ... bounded by limit.
+func backoffSeconds(attempt int, limit int32) int32 {
 	n := int32(1)
-	for i := 1; i < attempt && n < 300; i++ {
+	for i := 1; i < attempt && n < limit; i++ {
 		n *= 2
 	}
-	if n > 300 {
-		return 300
-	}
-	return n
+	return min(n, limit)
 }
 func permanent(err error) bool {
 	var de *domain.Error

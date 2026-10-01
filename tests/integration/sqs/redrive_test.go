@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"strings"
 	"sync"
@@ -26,7 +27,7 @@ import (
 )
 
 // Mirrors infra/localstack/init-sqs.sh.
-const provisionedMaxReceiveCount = "3"
+const provisionedMaxReceiveCount = "15"
 
 // client signs as the broker operator: these tests create isolated queues.
 func client(t *testing.T) (*sqs.Client, string) {
@@ -182,6 +183,10 @@ func TestProvisionedInboundQueueRedrivesToDLQ(t *testing.T) {
 	}
 	if !strings.HasSuffix(policy.DeadLetterTargetArn, ":wager-transactions-dlq.fifo") {
 		t.Fatalf("redrive target = %q", policy.DeadLetterTargetArn)
+	}
+	// The retry budget is sized for transient outages (F-2); the tests mirror it.
+	if got := fmt.Sprint(policy.MaxReceiveCount); got != provisionedMaxReceiveCount {
+		t.Fatalf("provisioned maxReceiveCount = %s, tests assume %s", got, provisionedMaxReceiveCount)
 	}
 }
 

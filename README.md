@@ -63,7 +63,15 @@ curl -fsS -X POST http://localhost:8081/wallets \
 
 ## Queue behavior
 
-MiniStack provisions `wager-transactions.fifo`, `wager-transactions-dlq.fifo`, and `wager-events.fifo`. The consumer records SQS `messageId` in its PostgreSQL inbox in the same transaction as financial effects. It deletes a receipt only after commit; invalid messages are left for queue redrive, and transient failures use bounded visibility backoff. On shutdown, unstarted batch receipts are made visible again. The default inbound visibility is 60 seconds; long-poll is 10 seconds and requests contain at most 10 messages.
+MiniStack provisions `wager-transactions.fifo`, `wager-transactions-dlq.fifo`, and `wager-events.fifo`. The consumer records SQS `messageId` in its PostgreSQL inbox in the same transaction as financial effects. It deletes a receipt only after commit; invalid messages are left for queue redrive, and transient failures use bounded visibility backoff (see "Retry and redrive bounds" below). On shutdown, unstarted batch receipts are made visible again. The default inbound visibility is 60 seconds; long-poll is 10 seconds and requests contain at most 10 messages.
+
+### Retry and redrive bounds
+
+- **Visibility:** a received message is hidden for 60 s. A transient processing failure resets it to 1 s, 2 s, 4 s, 8 s, 16 s, 32 s, then 60 s for every later receive (`MaxBackoffSeconds`). A poison (malformed or permanently invalid) message is retried every 1 s.
+- **Redrive:** `wager-transactions.fifo` moves a message to `wager-transactions-dlq.fifo` after 15 receives (`maxReceiveCount` in `infra/localstack/init-sqs.sh`). A poison message therefore reaches the DLQ in about 15 s. A message that keeps failing transiently while PostgreSQL still answers its readiness ping is dead-lettered after about 10 minutes of backoff (1+2+4+8+16+32+9x60 s).
+- **PostgreSQL outage:** before each receive the consumer pings PostgreSQL; while the ping fails it receives nothing (logging one `SQS receives paused` warning, `receives resumed` afterwards), so an outage of any length spends none of the redrive budget and valid wagers stay on the queue until the database returns. If the database fails mid-batch, the remaining unstarted messages are released unprocessed. Messages already in flight at the moment of failure cost one receive each.
+- **Residual window:** if the database is reachable but every commit keeps failing for more than the ~10 minute backoff window, the wager is dead-lettered and needs a manual redrive from the DLQ (SQS console/CLI `start-message-move-task`, or re-sending the body).
+- **Shutdown (SIGTERM):** unstarted receipts are made visible again (visibility 0), never deleted.
 
 FIFO grouping and deduplication use the wallet aggregate identifier and stable event ID respectively. Outbound events are read from the transactional outbox and sent to `wager-events.fifo`; consumers should deduplicate by `eventId` because a crash after broker acceptance but before recording publication can cause the same event to be delivered again. Reference retries and outbox publication use database leases, bounded retries, and recover after process restart.
 

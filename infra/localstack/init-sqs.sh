@@ -34,9 +34,13 @@ awslocal sqs create-queue \
   --attributes FifoQueue=true,ContentBasedDeduplication=true
 
 # maxReceiveCount is mirrored by tests/integration/sqs (provisionedMaxReceiveCount).
+# 15 receives: the consumer pauses receiving while PostgreSQL is down (so an
+# outage spends none of them) and backs off 1,2,4,8,16,32,60,60,... s after a
+# transient failure, i.e. ~10 min of failures while the database still answers
+# its readiness ping; poison messages (retried every 1 s) reach the DLQ in ~15 s.
 awslocal sqs create-queue \
   --queue-name "$INBOUND" \
-  --attributes FifoQueue=true,ContentBasedDeduplication=true,RedrivePolicy="\"{\\\"deadLetterTargetArn\\\":\\\"$(arn "$DLQ")\\\",\\\"maxReceiveCount\\\":\\\"3\\\"}\""
+  --attributes FifoQueue=true,ContentBasedDeduplication=true,RedrivePolicy="\"{\\\"deadLetterTargetArn\\\":\\\"$(arn "$DLQ")\\\",\\\"maxReceiveCount\\\":\\\"15\\\"}\""
 
 awslocal sqs create-queue \
   --queue-name "$EVENTS" \

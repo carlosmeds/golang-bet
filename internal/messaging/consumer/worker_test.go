@@ -104,3 +104,110 @@ func TestCancelledBatchReleasesAllReceipts(t *testing.T) {
 		t.Fatal("deleted uncommitted receipt")
 	}
 }
+
+type receiveCounter struct {
+	fakeSQS
+	received int
+}
+
+func (r *receiveCounter) ReceiveMessage(ctx context.Context, in *sqs.ReceiveMessageInput, o ...func(*sqs.Options)) (*sqs.ReceiveMessageOutput, error) {
+	r.received++
+	return r.fakeSQS.ReceiveMessage(ctx, in, o...)
+}
+
+// While the dependency is down nothing is received, so the queue's redrive
+// budget is not spent on valid messages (F-2).
+func TestReceivesPauseWhileDependencyUnavailable(t *testing.T) {
+	broker := &receiveCounter{fakeSQS: fakeSQS{message: types.Message{Body: aws.String(validBody), ReceiptHandle: aws.String("r"), Attributes: map[string]string{"ApproximateReceiveCount": "1"}}}}
+	process := &fakeProcessor{}
+	worker, err := New(broker, process, DefaultConfig("queue-url"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	up := false
+	worker.Ready = func(context.Context) error {
+		if !up {
+			return errors.New("connection refused")
+		}
+		return nil
+	}
+	for i := 0; i < 5; i++ {
+		if err := worker.RunOnce(context.Background()); !errors.Is(err, ErrDependencyUnavailable) {
+			t.Fatalf("RunOnce while down = %v", err)
+		}
+	}
+	if broker.received != 0 || process.calls != 0 {
+		t.Fatalf("received %d, processed %d while the dependency was down", broker.received, process.calls)
+	}
+	up = true
+	if err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if broker.received != 1 || process.calls != 1 || broker.deleted != 1 {
+		t.Fatalf("after recovery: received %d, processed %d, deleted %d", broker.received, process.calls, broker.deleted)
+	}
+}
+
+// After a transient failure the rest of the batch is released unprocessed
+// while the dependency stays down, instead of spending an attempt each.
+func TestTransientFailureReleasesRestOfBatchWhileDown(t *testing.T) {
+	attrs := map[string]string{"ApproximateReceiveCount": "1"}
+	broker := &fakeSQS{messages: []types.Message{
+		{Body: aws.String(validBody), ReceiptHandle: aws.String("one"), Attributes: attrs},
+		{Body: aws.String(validBody), ReceiptHandle: aws.String("two"), Attributes: attrs},
+		{Body: aws.String(validBody), ReceiptHandle: aws.String("three"), Attributes: attrs},
+	}}
+	process := &fakeProcessor{err: errors.New("connection refused")}
+	worker, err := New(broker, process, DefaultConfig("queue-url"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	down := false
+	worker.Ready = func(context.Context) error {
+		if down {
+			return errors.New("connection refused")
+		}
+		return nil
+	}
+	process.err = errors.New("connection refused")
+	// The first Execute fails and the dependency is then reported down.
+	worker.Service = failAndGoDown{process: process, down: &down}
+	if err := worker.RunOnce(context.Background()); !errors.Is(err, ErrDependencyUnavailable) {
+		t.Fatalf("RunOnce = %v, want ErrDependencyUnavailable", err)
+	}
+	if process.calls != 1 {
+		t.Fatalf("Execute called %d times, want 1", process.calls)
+	}
+	// First message: backoff; the other two: released immediately (0).
+	if len(broker.changed) != 3 || broker.changed[0] != 1 || broker.changed[1] != 0 || broker.changed[2] != 0 {
+		t.Fatalf("visibility changes %+v, want [1 0 0]", broker.changed)
+	}
+	if broker.deleted != 0 {
+		t.Fatal("deleted an uncommitted receipt")
+	}
+}
+
+type failAndGoDown struct {
+	process *fakeProcessor
+	down    *bool
+}
+
+func (f failAndGoDown) Execute(ctx context.Context, op contract.Operation, key, id string, in *wager.Inbox) (wager.Result, error) {
+	*f.down = true
+	return f.process.Execute(ctx, op, key, id, in)
+}
+
+func TestBackoffIsExponentialAndBounded(t *testing.T) {
+	want := []int32{1, 2, 4, 8, 16, 32, 60, 60, 60}
+	for i, w := range want {
+		if got := backoffSeconds(i+1, 60); got != w {
+			t.Errorf("attempt %d: backoff %d, want %d", i+1, got, w)
+		}
+	}
+	if got := backoffSeconds(1000, 60); got != 60 {
+		t.Errorf("large attempt: %d", got)
+	}
+	if got := backoffSeconds(0, 60); got != 1 {
+		t.Errorf("attempt 0: %d", got)
+	}
+}
