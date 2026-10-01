@@ -393,7 +393,7 @@ tasks:
   orca_dispatch_id: ctx_57889572f609
   commit: 8237837
 - id: R19-F2
-  state: active
+  state: complete
   title: Preserve valid SQS wagers through database outages
   depends_on:
   - R19-F1
@@ -406,8 +406,9 @@ tasks:
   reasoning_effort: high
   orca_task_id: task_5e1c3eecb14d
   orca_dispatch_id: ctx_af2dbff62ff8
+  commit: e407cc6
 - id: R19-F3
-  state: active
+  state: complete
   title: Improve ordered outbox throughput
   depends_on: []
   parallel_group: adversarial_repairs
@@ -420,6 +421,7 @@ tasks:
   actual_model: gpt-6-sol
   orca_task_id: task_2cbcf6bdae49
   orca_dispatch_id: ctx_cd927eb08c64
+  commit: 4c66491
 - id: R19-F4
   state: complete
   title: Map transient database errors to HTTP 503
