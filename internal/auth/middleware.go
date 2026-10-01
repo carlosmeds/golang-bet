@@ -143,7 +143,11 @@ func (m *Middleware) reject(w http.ResponseWriter, r *http.Request, err error) {
 		body.CorrelationID = m.CorrelationID(r)
 	}
 	// The reason is logged, never returned: clients learn only the class.
-	m.log.WarnContext(r.Context(), "request rejected", "status", status, "reason", err.Error(), "path", r.URL.Path)
+	attrs := []any{"status", status, "reason", err.Error(), "path", r.URL.Path}
+	if m.CorrelationID != nil {
+		attrs = append(attrs, "correlationId", m.CorrelationID(r))
+	}
+	m.log.WarnContext(r.Context(), "request rejected", attrs...)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)

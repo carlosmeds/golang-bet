@@ -50,6 +50,8 @@ type Processor interface {
 type Observer interface {
 	CountRetry()
 	CountDLQ()
+	CountDuplicate()
+	CountConflict()
 }
 
 type Worker struct {
@@ -150,6 +152,11 @@ func (w *Worker) handle(ctx context.Context, m types.Message) error {
 	}
 	result, err := w.Service.Execute(ctx, request.Data.Operation, request.Data.IdempotencyKey, request.MessageID, &wager.Inbox{Consumer: w.Config.ConsumerName, MessageID: request.MessageID, PayloadHash: hash})
 	if err != nil {
+		w.Logger.WarnContext(ctx, "SQS wager was not durably accepted", "messageId", request.MessageID, "correlationId", request.MessageID, "providerId", request.Data.ProviderID, "externalTransactionId", request.Data.ExternalTransactionID, "error", err)
+		var de *domain.Error
+		if errors.As(err, &de) && de.Kind == domain.ErrKindConflict && w.Observer != nil {
+			w.Observer.CountConflict()
+		}
 		if permanent(err) {
 			return w.deferPoison(ctx, m, err)
 		}
@@ -166,7 +173,14 @@ func (w *Worker) handle(ctx context.Context, m types.Message) error {
 	}
 	// PROCESSED, REJECTED and PENDING_REFERENCE all have durable records. The
 	// latter is resumed by the reference worker, independent of this SQS receipt.
-	_ = result
+	if result.Replay && w.Observer != nil {
+		w.Observer.CountDuplicate()
+	}
+	attrs := []any{"messageId", request.MessageID, "correlationId", request.MessageID, "providerId", request.Data.ProviderID, "externalTransactionId", request.Data.ExternalTransactionID, "idempotentReplay", result.Replay}
+	if result.Transaction != nil {
+		attrs = append(attrs, "transactionId", result.Transaction.ID().String(), "walletId", result.Transaction.WalletID().String(), "status", string(result.Transaction.Status()))
+	}
+	w.Logger.InfoContext(ctx, "SQS wager durably processed", attrs...)
 	if err := afterDurableCommit(ctx, w.API, w.Config.QueueURL, m); err != nil {
 		return err
 	}

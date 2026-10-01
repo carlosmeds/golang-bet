@@ -214,9 +214,10 @@ feed:
 }
 
 type parsed struct {
-	eventType   domain.EventType
-	aggregateID string
-	occurredAt  time.Time
+	eventType     domain.EventType
+	aggregateID   string
+	correlationID string
+	occurredAt    time.Time
 }
 
 // header reads the envelope header of a stored snapshot and checks that it
@@ -229,7 +230,7 @@ func header(e pg.ClaimedEvent) (parsed, error) {
 	if h.EventID != e.EventID || h.AggregateID.String() == "" || h.EventType == "" {
 		return parsed{}, errors.New("stored outbox payload header does not match its row")
 	}
-	return parsed{eventType: h.EventType, aggregateID: h.AggregateID.String(), occurredAt: h.OccurredAt}, nil
+	return parsed{eventType: h.EventType, aggregateID: h.AggregateID.String(), correlationID: h.CorrelationID, occurredAt: h.OccurredAt}, nil
 }
 
 func groupByAggregate(events []pg.ClaimedEvent) [][]pg.ClaimedEvent {
@@ -305,13 +306,14 @@ func (p *Publisher) publish(parent context.Context, e pg.ClaimedEvent) Attempt {
 		case err == nil:
 			a.Result = ResultPublished
 			a.Lag = max(0, p.now().Sub(h.occurredAt))
+			p.log.Info("outbox event published", "eventId", e.EventID.String(), "eventType", string(h.eventType), "aggregateId", h.aggregateID, "correlationId", h.correlationID, "outboxLagMs", a.Lag.Milliseconds())
 		case errors.Is(err, pg.ErrConcurrentUpdate):
 			a.Result, a.Err = ResultLeaseLost, err
-			p.log.Warn("outbox lease lost after publish; the event may be published again with the same eventId", "eventId", e.EventID.String())
+			p.log.Warn("outbox lease lost after publish; the event may be published again with the same eventId", "eventId", e.EventID.String(), "aggregateId", h.aggregateID, "correlationId", h.correlationID)
 		default:
 			// Published but not recorded: it will be sent again, same eventId.
 			a.Result, a.Err = ResultError, err
-			p.log.Warn("outbox publish not recorded; the event will be published again with the same eventId", "eventId", e.EventID.String(), "error", reason(err))
+			p.log.Warn("outbox publish not recorded; the event will be published again with the same eventId", "eventId", e.EventID.String(), "aggregateId", h.aggregateID, "correlationId", h.correlationID, "error", reason(err))
 		}
 		return p.finish(a, started)
 	}
@@ -322,7 +324,7 @@ func (p *Publisher) publish(parent context.Context, e pg.ClaimedEvent) Attempt {
 	case err == nil:
 		a.Result = ResultRetry
 		if parent.Err() == nil {
-			p.log.Warn("outbox publish failed; retry scheduled", "eventId", e.EventID.String(), "eventType", string(h.eventType), "retryIn", delay, "error", reason(sendErr))
+			p.log.Warn("outbox publish failed; retry scheduled", "eventId", e.EventID.String(), "eventType", string(h.eventType), "aggregateId", h.aggregateID, "correlationId", h.correlationID, "retryIn", delay, "error", reason(sendErr))
 		}
 	case errors.Is(err, pg.ErrConcurrentUpdate):
 		a.Result = ResultLeaseLost

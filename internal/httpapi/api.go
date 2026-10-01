@@ -39,6 +39,7 @@ type API struct {
 }
 
 func NewAPI(w *wallets.Service, g *wager.Service, s *pg.Store, a *auth.Middleware, c config.Config, client *sqs.Client, metrics *observability.Metrics) *API {
+	a.CorrelationID = func(r *http.Request) string { return correlation(r) }
 	return &API{Wallets: w, Wagers: g, Store: s, Auth: a, Config: c, SQS: client, Metrics: metrics}
 }
 func (a *API) Handler() http.Handler {
@@ -49,13 +50,13 @@ func (a *API) Handler() http.Handler {
 	})
 	mux.HandleFunc("GET /health/ready", a.ready)
 	mux.Handle("GET /metrics", a.Metrics.Handler())
-	mux.Handle("POST /wallets", a.Auth.Internal(http.HandlerFunc(a.openWallet)))
-	mux.Handle("GET /wallets/{walletId}", a.Auth.Internal(http.HandlerFunc(a.getWallet)))
-	mux.Handle("GET /wallets/{walletId}/ledger", a.Auth.Internal(http.HandlerFunc(a.getLedger)))
-	mux.Handle("POST /wallets/{walletId}/reconciliation", a.Auth.Internal(http.HandlerFunc(a.reconcile)))
-	mux.Handle("POST /wagering/transactions", a.Auth.Provider(http.HandlerFunc(a.submit)))
-	mux.Handle("GET /wagering/transactions/{transactionId}", a.Auth.Provider(http.HandlerFunc(a.getTransaction)))
-	mux.Handle("GET /providers/{providerId}/wagering/transactions/{externalTransactionId}", a.Auth.Provider(http.HandlerFunc(a.getExternalTransaction)))
+	mux.Handle("POST /wallets", a.Auth.Internal(a.logRequest(http.HandlerFunc(a.openWallet))))
+	mux.Handle("GET /wallets/{walletId}", a.Auth.Internal(a.logRequest(http.HandlerFunc(a.getWallet))))
+	mux.Handle("GET /wallets/{walletId}/ledger", a.Auth.Internal(a.logRequest(http.HandlerFunc(a.getLedger))))
+	mux.Handle("POST /wallets/{walletId}/reconciliation", a.Auth.Internal(a.logRequest(http.HandlerFunc(a.reconcile))))
+	mux.Handle("POST /wagering/transactions", a.Auth.Provider(a.logRequest(http.HandlerFunc(a.submit))))
+	mux.Handle("GET /wagering/transactions/{transactionId}", a.Auth.Provider(a.logRequest(http.HandlerFunc(a.getTransaction))))
+	mux.Handle("GET /providers/{providerId}/wagering/transactions/{externalTransactionId}", a.Auth.Provider(a.logRequest(http.HandlerFunc(a.getExternalTransaction))))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		rw := &statusWriter{ResponseWriter: w}
@@ -63,6 +64,28 @@ func (a *API) Handler() http.Handler {
 		if r.URL.Path != "/metrics" && r.URL.Path != "/health/live" && r.URL.Path != "/health/ready" {
 			a.Metrics.RecordHTTP(rw.status, time.Since(started), false)
 		}
+	})
+}
+
+func (a *API) logRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		logged := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(logged, r)
+		status := logged.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		attrs := []any{"correlationId", correlation(r), "method", r.Method, "route", r.Pattern, "status", status, "durationMs", time.Since(started).Milliseconds()}
+		if id, ok := auth.FromContext(r.Context()); ok && id.ProviderID != "" {
+			attrs = append(attrs, "providerId", id.ProviderID)
+		}
+		for _, key := range []string{"walletId", "transactionId", "externalTransactionId"} {
+			if value := r.PathValue(key); value != "" {
+				attrs = append(attrs, key, value)
+			}
+		}
+		slog.InfoContext(r.Context(), "HTTP request completed", attrs...)
 	})
 }
 

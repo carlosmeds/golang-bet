@@ -95,8 +95,10 @@ func (m *Metrics) RecordOutboxPublished(lag time.Duration) {
 	m.OutboxLagMillis.Add(uint64(max(0, lag.Milliseconds())))
 }
 
-func (m *Metrics) CountRetry() { m.Retries.Add(1) }
-func (m *Metrics) CountDLQ()   { m.DLQ.Add(1) }
+func (m *Metrics) CountRetry()     { m.Retries.Add(1) }
+func (m *Metrics) CountDLQ()       { m.DLQ.Add(1) }
+func (m *Metrics) CountDuplicate() { m.Duplicates.Add(1) }
+func (m *Metrics) CountConflict()  { m.Conflicts.Add(1) }
 
 func (m *Metrics) Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
