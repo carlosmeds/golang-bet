@@ -469,6 +469,7 @@ tasks:
   - R19-F10B
   - R19-F10C
   - R19-F11
+  - R19-F12
   parallel_group: release_documentation
   owner_area: README.md, ARCHITECTURE.md
   deliverables: Business/error contracts, money/hash normalization, state machine, reversal/reference/SQS/outbox contracts and limitations
@@ -565,6 +566,20 @@ tasks:
   reasoning_effort: high
   orca_task_id: task_169caccb7d64
   orca_dispatch_id: ctx_e2ed83a1c28c
+  actual_model: gpt-6-sol
+- id: R19-F12
+  state: active
+  title: Grant the metrics poller scoped DLQ read access
+  depends_on:
+  - R19-F1
+  - R19-F5
+  parallel_group: adversarial_repairs
+  owner_area: infra/localstack/init-sqs.sh and SQS access integration tests
+  deliverables: App identity can read only its configured redrive target's queue URL/attributes for DLQ metrics
+  done_when: Live broker test proves DLQ snapshot reads work and app identity still cannot publish to or consume from the DLQ
+  agent: codex
+  model_tier: standard
+  reasoning_effort: medium
   actual_model: gpt-6-sol
 parallel_sets:
 - after: []

@@ -113,3 +113,6 @@ R19-F10B changes `RetryPending` to require a nonempty lease owner and checks, af
 
 ### D51 — Keep financial and snapshot metrics bounded and preserve last-good values
 R19-F5 limits financial outcome labels to fixed source/status enums and constrains HTTP status labels to known codes plus `other`; IDs and payload data are never metric labels. The 15-second snapshot reads unpublished outbox count/oldest event age from PostgreSQL and visible messages from the inbound queue's configured redrive target. Poll failures log and preserve the last successfully sampled gauge values. Focused race tests and a live HTTP metrics endpoint scrape pass; the snapshot adapter was tested against PostgreSQL/SQS fakes, so final integrated real-stack verification must exercise the actual gauge poller.
+
+### D52 — Scope the app's DLQ metrics access to read-only calls
+The metrics snapshot resolves the inbound queue's redrive target and reads its visible-message attribute. R19-F1's least-privilege app policy covered only inbound consumption and event publication, so the DLQ snapshot would be denied by the broker. Add only `GetQueueUrl` and `GetQueueAttributes` on the configured DLQ ARN; keep send, receive, delete and visibility actions unavailable on that queue. Verify through the signed local gateway with the actual app identity.
