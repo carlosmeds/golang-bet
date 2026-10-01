@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"go.uber.org/fx"
 	"wagering/internal/config"
+	"wagering/internal/workers/outbox"
 )
 
 func New(c config.Config) (*sqs.Client, error) {
@@ -23,4 +24,4 @@ func New(c config.Config) (*sqs.Client, error) {
 	}), nil
 }
 
-var Module = fx.Module("sqs", fx.Provide(New))
+var Module = fx.Module("sqs", fx.Provide(New, fx.Annotate(NewOutboxSender, fx.As(new(outbox.Sender)))))
