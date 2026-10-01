@@ -280,6 +280,7 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request) {
 	if result.Replay {
 		a.Metrics.Duplicates.Add(1)
 	}
+	a.Metrics.RecordTransaction("http", result.Transaction.Status())
 	status := http.StatusCreated
 	if result.Replay {
 		status = http.StatusOK

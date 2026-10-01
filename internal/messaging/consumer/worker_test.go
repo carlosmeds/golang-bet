@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -38,15 +39,56 @@ func (f *fakeSQS) ChangeMessageVisibility(_ context.Context, in *sqs.ChangeMessa
 }
 
 type fakeProcessor struct {
-	err   error
-	calls int
-	inbox *wager.Inbox
+	err    error
+	result wager.Result
+	calls  int
+	inbox  *wager.Inbox
 }
 
 func (f *fakeProcessor) Execute(_ context.Context, _ contract.Operation, _, _ string, inbox *wager.Inbox) (wager.Result, error) {
 	f.calls++
 	f.inbox = inbox
-	return wager.Result{}, f.err
+	return f.result, f.err
+}
+
+type metricObserver struct {
+	status  domain.Status
+	source  string
+	elapsed time.Duration
+}
+
+func (*metricObserver) CountRetry()     {}
+func (*metricObserver) CountDLQ()       {}
+func (*metricObserver) CountDuplicate() {}
+func (*metricObserver) CountConflict()  {}
+func (m *metricObserver) RecordTransaction(source string, status domain.Status) {
+	m.source, m.status = source, status
+}
+func (m *metricObserver) RecordProcessing(source string, elapsed time.Duration) {
+	m.source, m.elapsed = source, elapsed
+}
+
+func TestSQSOutcomeAndLatencyObservedAfterDurableResult(t *testing.T) {
+	money, err := domain.NewMoney(100, domain.Currency("BRL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := domain.NewOpeningTransaction(domain.NewUUID(), domain.NewUUID(), "player", money, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := &metricObserver{}
+	broker := &fakeSQS{message: types.Message{Body: aws.String(validBody), ReceiptHandle: aws.String("receipt")}}
+	worker, err := New(broker, &fakeProcessor{result: wager.Result{Transaction: tx}}, DefaultConfig("queue-url"), nil, observer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if observer.source != "sqs" || observer.status != domain.StatusProcessed || broker.deleted != 1 {
+		t.Fatalf("metrics: %+v; deleted: %d", observer, broker.deleted)
+	}
 }
 func TestAckOnlyAfterDurableSuccess(t *testing.T) {
 	for _, tc := range []struct {

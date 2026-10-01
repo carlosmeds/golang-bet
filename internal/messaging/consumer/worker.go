@@ -211,6 +211,12 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	return nil
 }
 func (w *Worker) handle(ctx context.Context, m types.Message) error {
+	started := time.Now()
+	defer func() {
+		if observer, ok := w.Observer.(interface{ RecordProcessing(string, time.Duration) }); ok {
+			observer.RecordProcessing("sqs", time.Since(started))
+		}
+	}()
 	body := aws.ToString(m.Body)
 	sum := sha256.Sum256([]byte(body))
 	hash := hex.EncodeToString(sum[:])
@@ -244,6 +250,11 @@ func (w *Worker) handle(ctx context.Context, m types.Message) error {
 	// latter is resumed by the reference worker, independent of this SQS receipt.
 	if result.Replay && w.Observer != nil {
 		w.Observer.CountDuplicate()
+	}
+	if result.Transaction != nil {
+		if observer, ok := w.Observer.(interface{ RecordTransaction(string, domain.Status) }); ok {
+			observer.RecordTransaction("sqs", result.Transaction.Status())
+		}
 	}
 	attrs := []any{"messageId", request.MessageID, "correlationId", request.MessageID, "providerId", request.Data.ProviderID, "externalTransactionId", request.Data.ExternalTransactionID, "idempotentReplay", result.Replay}
 	if result.Transaction != nil {

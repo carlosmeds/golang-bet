@@ -47,6 +47,7 @@ const (
 type Attempt struct {
 	ID          domain.UUID
 	Result      Result
+	Status      domain.Status      // durable status after this attempt, when available
 	FailureCode domain.FailureCode // set for ResultRejected
 	Duration    time.Duration
 	Err         error // set for ResultError
@@ -186,6 +187,7 @@ func (w *Worker) attempt(parent context.Context, id domain.UUID) Attempt {
 	case res.Replay:
 		a.Result = ResultStale
 	default:
+		a.Status = res.Transaction.Status()
 		switch res.Transaction.Status() {
 		case domain.StatusProcessed:
 			a.Result = ResultResolved
