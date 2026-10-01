@@ -47,18 +47,23 @@ func (c Config) Validate() error {
 type Processor interface {
 	Execute(context.Context, contract.Operation, string, string, *wager.Inbox) (wager.Result, error)
 }
-
-type Worker struct {
-	API     API
-	Service Processor
-	Config  Config
-	Logger  *slog.Logger
-	cancel  context.CancelFunc
-	done    chan struct{}
-	mu      sync.Mutex
+type Observer interface {
+	CountRetry()
+	CountDLQ()
 }
 
-func New(api API, svc Processor, c Config, logger *slog.Logger) (*Worker, error) {
+type Worker struct {
+	API      API
+	Service  Processor
+	Config   Config
+	Logger   *slog.Logger
+	Observer Observer
+	cancel   context.CancelFunc
+	done     chan struct{}
+	mu       sync.Mutex
+}
+
+func New(api API, svc Processor, c Config, logger *slog.Logger, observers ...Observer) (*Worker, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
@@ -68,7 +73,11 @@ func New(api API, svc Processor, c Config, logger *slog.Logger) (*Worker, error)
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Worker{API: api, Service: svc, Config: c, Logger: logger}, nil
+	var observer Observer
+	if len(observers) > 0 {
+		observer = observers[0]
+	}
+	return &Worker{API: api, Service: svc, Config: c, Logger: logger, Observer: observer}, nil
 }
 func (w *Worker) Start() {
 	w.mu.Lock()
@@ -144,6 +153,9 @@ func (w *Worker) handle(ctx context.Context, m types.Message) error {
 		if permanent(err) {
 			return w.deferPoison(ctx, m, err)
 		}
+		if w.Observer != nil {
+			w.Observer.CountRetry()
+		}
 		count := receiveCount(m)
 		delay := backoffSeconds(count)
 		_, changeErr := w.API.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{QueueUrl: aws.String(w.Config.QueueURL), ReceiptHandle: aws.String(receipt), VisibilityTimeout: delay})
@@ -155,10 +167,16 @@ func (w *Worker) handle(ctx context.Context, m types.Message) error {
 	// PROCESSED, REJECTED and PENDING_REFERENCE all have durable records. The
 	// latter is resumed by the reference worker, independent of this SQS receipt.
 	_ = result
+	if err := afterDurableCommit(ctx, w.API, w.Config.QueueURL, m); err != nil {
+		return err
+	}
 	_, err = w.API.DeleteMessage(ctx, &sqs.DeleteMessageInput{QueueUrl: aws.String(w.Config.QueueURL), ReceiptHandle: aws.String(receipt)})
 	return err
 }
 func (w *Worker) deferPoison(ctx context.Context, m types.Message, cause error) error {
+	if w.Observer != nil {
+		w.Observer.CountDLQ()
+	}
 	// SQS redrive moves a poison message to the configured DLQ after its max
 	// receive count. Leave the receipt unacknowledged and shorten visibility.
 	_, err := w.API.ChangeMessageVisibility(ctx, &sqs.ChangeMessageVisibilityInput{QueueUrl: aws.String(w.Config.QueueURL), ReceiptHandle: m.ReceiptHandle, VisibilityTimeout: 1})

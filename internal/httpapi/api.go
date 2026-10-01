@@ -1,18 +1,26 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
+	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"wagering/internal/auth"
+	"wagering/internal/config"
 	"wagering/internal/contract"
 	"wagering/internal/domain"
+	"wagering/internal/observability"
 	"wagering/internal/storage/pg"
 	wager "wagering/internal/usecase/wagering"
 	wallets "wagering/internal/usecase/wallet"
@@ -23,13 +31,24 @@ type API struct {
 	Wagers  *wager.Service
 	Store   *pg.Store
 	Auth    *auth.Middleware
+	Config  config.Config
+	SQS     interface {
+		GetQueueAttributes(context.Context, *sqs.GetQueueAttributesInput, ...func(*sqs.Options)) (*sqs.GetQueueAttributesOutput, error)
+	}
+	Metrics *observability.Metrics
 }
 
-func NewAPI(w *wallets.Service, g *wager.Service, s *pg.Store, a *auth.Middleware) *API {
-	return &API{Wallets: w, Wagers: g, Store: s, Auth: a}
+func NewAPI(w *wallets.Service, g *wager.Service, s *pg.Store, a *auth.Middleware, c config.Config, client *sqs.Client, metrics *observability.Metrics) *API {
+	return &API{Wallets: w, Wagers: g, Store: s, Auth: a, Config: c, SQS: client, Metrics: metrics}
 }
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("live\n"))
+	})
+	mux.HandleFunc("GET /health/ready", a.ready)
+	mux.Handle("GET /metrics", a.Metrics.Handler())
 	mux.Handle("POST /wallets", a.Auth.Internal(http.HandlerFunc(a.openWallet)))
 	mux.Handle("GET /wallets/{walletId}", a.Auth.Internal(http.HandlerFunc(a.getWallet)))
 	mux.Handle("GET /wallets/{walletId}/ledger", a.Auth.Internal(http.HandlerFunc(a.getLedger)))
@@ -37,7 +56,48 @@ func (a *API) Handler() http.Handler {
 	mux.Handle("POST /wagering/transactions", a.Auth.Provider(http.HandlerFunc(a.submit)))
 	mux.Handle("GET /wagering/transactions/{transactionId}", a.Auth.Provider(http.HandlerFunc(a.getTransaction)))
 	mux.Handle("GET /providers/{providerId}/wagering/transactions/{externalTransactionId}", a.Auth.Provider(http.HandlerFunc(a.getExternalTransaction)))
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		rw := &statusWriter{ResponseWriter: w}
+		mux.ServeHTTP(rw, r)
+		if r.URL.Path != "/metrics" && r.URL.Path != "/health/live" && r.URL.Path != "/health/ready" {
+			a.Metrics.RecordHTTP(rw.status, time.Since(started), false)
+		}
+	})
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+func (w *statusWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+func (a *API) ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	if err := a.Store.Pool.Ping(ctx); err != nil {
+		slog.WarnContext(ctx, "readiness database check failed", "error", err)
+		http.Error(w, "not ready", http.StatusServiceUnavailable)
+		return
+	}
+	_, err := a.SQS.GetQueueAttributes(ctx, &sqs.GetQueueAttributesInput{QueueUrl: aws.String(a.Config.WagerQueueURL), AttributeNames: []types.QueueAttributeName{types.QueueAttributeNameAll}})
+	if err != nil {
+		slog.WarnContext(ctx, "readiness queue check failed", "error", err)
+		http.Error(w, "not ready", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready\n"))
 }
 func respond(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -162,6 +222,9 @@ func (a *API) submit(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(w, r, err)
 		return
+	}
+	if result.Replay {
+		a.Metrics.Duplicates.Add(1)
 	}
 	status := http.StatusCreated
 	if result.Replay {
@@ -353,4 +416,8 @@ func (a *API) reconcile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, http.StatusOK, map[string]any{"walletId": id, "storedBalance": wallet.Balance(), "calculatedBalance": calculated, "difference": difference, "consistent": difference.IsZero(), "checkedEntries": len(entries)})
+	a.Metrics.RecordReconciliation(difference.IsZero())
+	if !difference.IsZero() {
+		slog.ErrorContext(r.Context(), "wallet reconciliation divergence", "walletId", id.String(), "correlationId", correlation(r))
+	}
 }
